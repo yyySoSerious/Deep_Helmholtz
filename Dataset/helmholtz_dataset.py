@@ -4,8 +4,9 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-import preprocessing as prep
+from . import preprocessing as prep
 
+#TODO: send data directly to device
 class Helmholtz_Dataset(Dataset):
 
     def __init__(self, root_dir, path_to_obj_dir_list, num_sel_views=1):
@@ -39,11 +40,11 @@ class Helmholtz_Dataset(Dataset):
                 depth_maps = prep.load_depth_maps(glob.glob(os.path.join(data_dir, '*_reciprocal_depth0001.exr'))[0])
                 masks = prep.generate_masks(depth_maps, min_depth, max_depth)
 
-                data['depth_maps'] = depth_maps
+                data['depth_gts'] = depth_maps
                 data['masks'] = masks
                 data['depth_values'] = np.array([min_depth, max_depth], np.float32)
 
-                # add recriprocal to the src images
+                # add reciprocal to the src images
                 reciprocal_id = 'right' if reciprocal_id == 'left' else 'left'
                 data_dir = os.path.join(self.root_dir, view['obj_dir'], f'view_{view_id}',
                                         self.reciprocals[reciprocal_id])

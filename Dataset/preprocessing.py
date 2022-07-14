@@ -64,16 +64,17 @@ def read_exr_image(path_to_image:str):
 
 def normalize_exr_image(image: str):
     image = image - image.min()
-    return image / image.max() * 255
+    return image / image.max()
 
 
 def imshow_exr(window_name: str, image: np.ndarray):
-    cv2.imshow(window_name, np.uint8(normalize_exr_image(image)))
+    cv2.imshow(window_name, np.uint8(normalize_exr_image(image)*255))
 
 def parse_objs(root_dir:str, path_to_obj_dir_list:str, num_sel_views):
+    path_to_obj_dir_list = os.path.join(root_dir, path_to_obj_dir_list)
     obj_dirs = open(path_to_obj_dir_list).readlines()
     obj_dirs = list(map(lambda path: path.strip(), obj_dirs))
-    obj_dirs = obj_dirs[60:64]
+    obj_dirs = obj_dirs[1:]
     views_data = []
     for obj_dir in obj_dirs:
         path_to_pair = os.path.join(root_dir, obj_dir, 'pair.txt')
@@ -91,13 +92,13 @@ def parse_objs(root_dir:str, path_to_obj_dir_list:str, num_sel_views):
     return views_data
 
 def load_depth_maps(path_to_depth_map:str):
-    stage3_depth_map = read_exr_image(path_to_depth_map)
-    h, w, _ = stage3_depth_map.shape
+    stage3_depth_map = read_exr_image(path_to_depth_map)[:,:, 0]
+    h, w = stage3_depth_map.shape
     stage2_depth_map = cv2.resize(stage3_depth_map, (w//2, h//2), interpolation=cv2.INTER_NEAREST)
     stage1_depth_map = cv2.resize(stage3_depth_map, (w//4, h//4), interpolation=cv2.INTER_NEAREST)
     return {'stage1': stage1_depth_map, 'stage2': stage2_depth_map, 'stage3': stage3_depth_map}
 
-
+#TODO: maybe, normalize data to [0 1]
 def get_image_data(data_dir: str):
     path_to_image = glob.glob(os.path.join(data_dir, '*_reciprocal0001.exr'))[0]
     image = read_exr_image(path_to_image)

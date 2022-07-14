@@ -86,7 +86,8 @@ class Deconv3dLayer(nn.Module):
         assert stride in [1, 2]
         self.stride = stride
 
-        self.conv = nn.BatchNorm3d(out_channels, momentum=bn_momentum) if bn else None
+        self.conv = nn.ConvTranspose3d(in_channels, out_channels, kernel_size, stride=stride, bias=(not bn), **kwargs)
+        self.bn = nn.BatchNorm3d(out_channels, momentum=bn_momentum) if bn else None
         self.relu = relu
 
     def forward(self, x):

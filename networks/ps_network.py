@@ -1,6 +1,5 @@
-import torch
 import torch.nn as nn
-import layers
+from . import layers
 
 class FeatExtractorNet(nn.Module):
     def __init__(self, base_channels):

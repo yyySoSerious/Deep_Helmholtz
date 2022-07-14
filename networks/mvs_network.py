@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import layers
+from . import layers
 
 class FeatExtractorNet(nn.Module):
     def __init__(self, base_channels, num_stages=3):
@@ -164,7 +164,7 @@ if __name__ == '__main__':
     someExtractor2 = submodules.FeatExtNet(8, 3)
     someExtractor2.apply(init_weights)
     output = someExtractor2(image)
-    print('Size of the stages of orinal featExt:',output['stage1'].size(), output['stage2'].size(), output['stage3'].size())
+    print('Size of the stages of original featExt:',output['stage1'].size(), output['stage2'].size(), output['stage3'].size())
     volume_input = output['stage1'].unsqueeze(2).repeat(1, 1, 8, 1, 1)
     print("Original: volume input shape: ", volume_input.size())
     costRegularizer2 = submodules.CostRegNet(32, 8)

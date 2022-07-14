@@ -10,7 +10,7 @@ def uncertainty_aware_samples(curr_depth, expected_variance, num_depth, dtype, d
         curr_depth_min = curr_depth[:, 0]  # shape: (B, )
         curr_depth_max = curr_depth[:, 1]  # shape: (B, )
         new_interval = (curr_depth_max - curr_depth_min) / (num_depth - 1)  # shape: (B, )
-        depth_range_samples = curr_depth_min.unsqueeze(1) + (torch.arange(0, num_depth, device, dtype=dtype,
+        depth_range_samples = curr_depth_min.unsqueeze(1) + (torch.arange(0, num_depth, device=device, dtype=dtype,
                                                                           requires_grad=False).reshape(1, -1) *
                                                              new_interval.unsqueeze(1))  # shape: (B, D)
         depth_range_samples = depth_range_samples.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, shape[1],
@@ -33,14 +33,16 @@ def uncertainty_aware_samples(curr_depth, expected_variance, num_depth, dtype, d
     return depth_range_samples
 
 
-def compute_depth(curr_stage_features, curr_stage_projection_mats, depth_samples, cost_reg, gamma, is_training=False):
+# noinspection PyTypeChecker
+def compute_depth(curr_stage_features, curr_stage_projection_mats, depth_samples, cost_reg, conf_lambda,
+                  is_training=False):
     '''
 
     :param curr_stage_features:
     :param curr_stage_projection_mats:
     :param depth_samples:
     :param cost_reg:
-    :param gamma:
+    :param conf_lambda:
     :param is_training:
     :return:
     '''
@@ -77,7 +79,6 @@ def compute_depth(curr_stage_features, curr_stage_projection_mats, depth_samples
             volume_sq_sum += warped_volume.pow_(2)  # in_place method
         del warped_volume
     volume_variance = volume_sq_sum.div_(num_views).sub_(volume_sum.div_(num_views).pow_(2))
-
     prob_volume_pre = cost_reg(volume_variance).squeeze(1)
     prob_volume = F.softmax(prob_volume_pre, dim=1)
     depth = depth_regression(prob_volume, depth_samples=depth_samples)
@@ -91,9 +92,9 @@ def compute_depth(curr_stage_features, curr_stage_projection_mats, depth_samples
         prob_conf = torch.gather(prob_volume_sum4, 1, depth_index.unsqueeze(1)).squeeze(1)
 
     variance_samples = (depth_samples - depth.unsqueeze(1)) ** 2
-    expected_variance = gamma * torch.sum(variance_samples * prob_volume, dim=1, keepdim=False) ** 0.5
+    expected_variance = conf_lambda * torch.sum(variance_samples * prob_volume, dim=1, keepdim=False) ** 0.5
 
-    return {"depth": depth, "confidence": prob_conf, 'variance': expected_variance}
+    return {'depth': depth, 'confidence': prob_conf, 'variance': expected_variance}
 
 
 def homo_warping(src_feat, src_proj, ref_proj, depth_samples):
@@ -113,8 +114,8 @@ def homo_warping(src_feat, src_proj, ref_proj, depth_samples):
         rot = proj[:, :3, :3]  # shape: (B, 3, 3)
         trans = proj[:, :3, 3:4]  # shape: (B, 3, 1)
 
-        y, x = torch.meshgrid([torch.arange(0, height, dtype=torch.float32, device=src_feat.device),
-                               torch.arange(0, width, dtype=torch.float32, device=src_feat.device)])
+        y, x = torch.meshgrid(torch.arange(0, height, dtype=torch.float32, device=src_feat.device),
+                              torch.arange(0, width, dtype=torch.float32, device=src_feat.device), indexing='ij')
         y, x = y.contiguous(), x.contiguous()
         y, x = y.view(height * width), x.view(height * width)  # shape: (HxW,), (HxW,)
         xyz = torch.stack((x, y, torch.ones_like(x)))  # shape: (3, H*W)
@@ -130,7 +131,8 @@ def homo_warping(src_feat, src_proj, ref_proj, depth_samples):
         grid = proj_xy
 
     warped_src_feat = F.grid_sample(src_feat, grid.view(batch, num_depths * height, width, 2), mode='bilinear',
-                                    padding_mode='zeros')
+                                    padding_mode='zeros', align_corners=False)
+
     warped_src_feat = warped_src_feat.view(batch, channels, num_depths, height, width)
 
     return warped_src_feat

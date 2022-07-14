@@ -1,16 +1,16 @@
 import torch.nn as nn
-import mvs_network as mvs
-import ps_network as ps
-from functions import *
+from . import mvs_network as mvs
+from . import ps_network as ps
+from .net_functions import *
 
 
 class HelmholtzNet(nn.Module):
-    def __init__(self, planes_in_stages=(64, 32, 8), gamma=1.5, grad_method='detach',
+    def __init__(self, planes_in_stages=(64, 32, 8), conf_lambda=1.5, grad_method='detach',
                  base_channels_per_stage=(8, 8, 8)):
         super(HelmholtzNet, self).__init__()
 
         self.planes_in_stages = planes_in_stages
-        self.gamma = gamma
+        self.conf_lambda = conf_lambda
         self.grad_method = grad_method
         self.base_channels_per_stage = base_channels_per_stage
         self.num_stages = len(planes_in_stages)
@@ -18,8 +18,8 @@ class HelmholtzNet(nn.Module):
 
         self.mvs_feature_extractor = mvs.FeatExtractorNet(base_channels=base_channels_per_stage[0],
                                                           num_stages=self.num_stages)
-        self.mvs_cost_regularizer = mvs.CostRegularizerNet(
-            [mvs.CostRegularizerNet(in_channels=self.feature_extractor.out.channels[i],
+        self.mvs_cost_regularizer = nn.ModuleList(
+            [mvs.CostRegularizerNet(in_channels=self.mvs_feature_extractor.out_channels[i],
                                     base_channels=self.base_channels_per_stage[i]) for i in range(self.num_stages)])
         self.ps_feature_extractor = ps.FeatExtractorNet(base_channels=base_channels_per_stage[0])
         self.ps_regressor = ps.RegressionNet(base_channels=base_channels_per_stage[0])
@@ -44,7 +44,7 @@ class HelmholtzNet(nn.Module):
             curr_stage_features = [feat[f'stage{stage_num + 1}'] for feat in features]
             curr_stage_projection_mats = projection_mats[f'stage{stage_num + 1}']
             scale_factor_inv = self.scale_factors_inv[f'stage{stage_num + 1}']
-            curr_height = img.shpae[2] // int(scale_factor_inv)
+            curr_height = img.shape[2] // int(scale_factor_inv)
             curr_width = img.shape[3] // int(scale_factor_inv)
 
             # Not the first stage
@@ -57,7 +57,7 @@ class HelmholtzNet(nn.Module):
 
                 curr_depth = F.interpolate(curr_depth.unsqueeze(1), [curr_height, curr_width], mode='bilinear')
                 expected_variance = F.interpolate(expected_variance.unsqueeze(1), [curr_height, curr_width],
-                                                  mode='biinear')
+                                                  mode='bilinear')
 
             # The first stage
             else:
@@ -72,7 +72,7 @@ class HelmholtzNet(nn.Module):
 
             curr_stage_outputs = compute_depth(curr_stage_features, curr_stage_projection_mats,
                                                depth_samples=depth_range_samples,
-                                               cost_reg=self.mvs_cost_regularizer[stage_num], gamma=self.gamma,
+                                               cost_reg=self.mvs_cost_regularizer[stage_num], conf_lambda=self.conf_lambda,
                                                is_training=self.training)
 
             depth = curr_stage_outputs['depth']
