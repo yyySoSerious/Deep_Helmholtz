@@ -9,13 +9,14 @@ from . import preprocessing as prep
 #TODO: send data directly to device
 class Helmholtz_Dataset(Dataset):
 
-    def __init__(self, root_dir, path_to_obj_dir_list, num_sel_views=1):
+    def __init__(self, root_dir, path_to_obj_dir_list, num_sel_views=1, mode='train'):
         super(Helmholtz_Dataset, self).__init__()
 
         self.root_dir = root_dir
         self.views_data = prep.parse_objs(self.root_dir, path_to_obj_dir_list, num_sel_views)
         self.reciprocals = {'left': 'left_reciprocal',
                             'right': 'right_reciprocal'}
+        self.mode = mode
 
     def __len__(self):
         return len(self.views_data)
@@ -37,11 +38,12 @@ class Helmholtz_Dataset(Dataset):
             stage3_projection_mats.append(projection_mat)
 
             if i == 0:
-                depth_maps = prep.load_depth_maps(glob.glob(os.path.join(data_dir, '*_reciprocal_depth0001.exr'))[0])
-                masks = prep.generate_masks(depth_maps, min_depth, max_depth)
+                if self.mode == 'train':
+                    depth_maps = prep.load_depth_maps(glob.glob(os.path.join(data_dir, '*_reciprocal_depth0001.exr'))[0])
+                    masks = prep.generate_masks(depth_maps, min_depth, max_depth)
 
-                data['depth_gts'] = depth_maps
-                data['masks'] = masks
+                    data['depth_gts'] = depth_maps
+                    data['masks'] = masks
                 data['depth_values'] = np.array([min_depth, max_depth], np.float32)
 
                 # add reciprocal to the src images

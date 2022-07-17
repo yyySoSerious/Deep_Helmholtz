@@ -56,6 +56,14 @@ def parse_cameras(camera_dir:str):
 
     return extrinsic_mat, intrinsic_mat
 
+def save_camera(save_path, projection_mat):
+    makedir(save_path)
+    extrinsic_mat = projection_mat[0, :4, :4]
+    intrinsic_mat = projection_mat[1, :3, :3]
+    np.savetxt(save_path + '/K_matrix.txt', np.matrix(intrinsic_mat))
+    np.savetxt(save_path + '/RT_matrix.txt', np.matrix(extrinsic_mat))
+
+
 
 def read_exr_image(path_to_image:str):
     return cv2.imread(

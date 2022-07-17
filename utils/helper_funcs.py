@@ -16,6 +16,28 @@ def get_step_schedule_with_warmup(optimizer, milestones, gamma=0.1, warmup_facto
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
 
+def save_checkpoint_func(model, optimizer, scheduler):
+    def save_checkpoint(checkpoint_path, epoch):
+        torch.save({'epoch': epoch + 1,
+                    'model': model.module.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    'scheduler': scheduler.state_dict()}, f'{checkpoint_path}/model_{epoch + 1:06d}.ckpt')
+
+    return save_checkpoint
+
+
+def load_checkpoint(checkpoint_path, model, optimizer=None, scheduler=None, device=torch.device('cpu')):
+    state_dict = torch.load(checkpoint_path, device)
+    model.load_state_dict(state_dict['model'])
+
+    if optimizer:
+        optimizer.load_state_dict(state_dict['optimizer'])
+    if scheduler:
+        scheduler.load_state_dict(state_dict['scheduler'])
+
+    return state_dict['epoch']
+
+
 def print_dict(data: dict, prefix: str= ''):
     for k, v in data.items():
         if isinstance(v, dict):

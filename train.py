@@ -41,22 +41,46 @@ def print_peak_memory(prefix, device):
 
 
 def initialize():
-    if is_distributed:
-        torch.cuda.set_device(local_rank)
-        dist.init_process_group(backend='nccl')
-        dist.barrier()
-
-
-    model = HelmholtzNet(planes_in_stages=list(map(int, args.planes_in_stages.split(','))),
-                         conf_lambda=args.conf_lambda).to(device)
-
-    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
-                                 lr=args.lr, betas=(args.beta_1, args.beta_2), weight_decay=args.lr_decay)
+    initial_epoch = 0
+    loader_data = {}
     train_set = Helmholtz_Dataset(root_dir=args.root_dir, path_to_obj_dir_list=args.train_list,
                                   num_sel_views=args.num_sel_views)
     val_set = Helmholtz_Dataset(root_dir=args.root_dir, path_to_obj_dir_list=args.val_list,
                                   num_sel_views=args.num_sel_views)
+    if is_distributed:
+        torch.cuda.set_device(local_rank)
+        dist.init_process_group(backend='nccl')
+        dist.barrier()
+        train_sampler = torch.utils.data.distributed.DistributedSampler(train_set, num_replicas=dist.get_world_size(),
+                                                                        rank=dist.get_rank())
+        val_sampler = torch.utils.data.distributed.DistributedSampler(val_set, num_replicas=dist.get_world_size(),
+                                                                        rank=dist.get_rank())
+    else:
+        train_sampler, val_sampler = None, None
 
+    loader_data['train_sampler'] = train_sampler
+    loader_data['val_sampler'] = val_sampler
+    loader_data['train_loader'] = torch.utils.data.DataLoader(train_set, args.batch, sampler=train_sampler, num_workers=1,
+                                               drop_last=True, shuffle=train_sampler is None, pin_memory=True)
+    loader_data['val_loader'] = torch.utils.data.DataLoader(val_set, args.batch, sampler=val_sampler, num_workers=1,
+                                               drop_last=True, shuffle=val_sampler is None,
+                                                            pin_memory=device_name != 'cpu')
+
+    model = HelmholtzNet(planes_in_stages=list(map(int, args.planes_in_stages.split(','))),
+                         conf_lambda=args.conf_lambda)
+
+    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
+                                 lr=args.lr, betas=(args.beta_1, args.beta_2), weight_decay=args.lr_decay)
+    milestones = list(map(lambda x: int(x) * len(loader_data['train_loader']), args.lr_idx.split(':')[0].split(',')))
+    gamma = float(args.lr_idx.split(':')[1])
+    scheduler = get_step_schedule_with_warmup(optimizer=optimizer, milestones=milestones, gamma=gamma)
+
+    if args.ckpt_to_continue:
+        print(f'Loading model {args.ckpt_to_continue} to continue training...')
+        initial_epoch = load_checkpoint(args.ckpt_to_continue, model, optimizer, scheduler)
+        print('Model loaded successfully')
+
+    model = model.to(device)
     if is_distributed:
         if args.sync_ban:
                 model = apex.parallel.convert_syncbn_model(model)
@@ -65,39 +89,28 @@ def initialize():
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank)
         optimizer = ZeroRedundancyOptimizer(model.parameters(), optimizer_class=torch.optim.Adam, lr=0.01)
 
-        train_sampler = torch.utils.data.distributed.DistributedSampler(train_set, num_replicas=dist.get_world_size(),
-                                                                        rank=dist.get_rank())
-        val_sampler = torch.utils.data.distributed.DistributedSampler(val_set, num_replicas=dist.get_world_size(),
-                                                                        rank=dist.get_rank())
     else:
         model = nn.DataParallel(model)
-        train_sampler, val_sampler = None, None
-
-
-    train_loader = torch.utils.data.DataLoader(train_set, args.batch, sampler=train_sampler, num_workers=1,
-                                               drop_last=True, shuffle=train_sampler is None, pin_memory=True)
-    val_loader = torch.utils.data.DataLoader(val_set, args.batch, sampler=val_sampler, num_workers=1,
-                                               drop_last=True, shuffle=val_sampler is None, pin_memory=True)
-
 
     print_peak_memory("Max memory allocated after creating local model", local_rank)
 
-    return model, optimizer, train_loader, train_sampler, val_loader, val_sampler
+    return model, optimizer, scheduler, initial_epoch, loader_data
 
-def trace_handler(p):
-    p.tensorboard_trace_handler
 
 @record
-def main(args, model, optimizer, train_loader, train_sampler, val_loader, val_sampler):
+def main(args, model, optimizer, scheduler, initial_epoch, loader_data):
+    train_loader = loader_data['train_loader']
+    train_sampler = loader_data['train_sampler']
+    val_loader = loader_data['val_loader']
+    val_sampler = loader_data['val_sampler']
     logger = None
+    checkpoint_dir = os.path.join(args.save_dir, 'checkpoints')
+    log_dir = os.path.join(args.save_dir, 'logs')
     if local_rank == 0:
-        makedir(args.save_dir)
-        logger = SummaryWriter(args.save_dir)
+        makedir(checkpoint_dir)
+        makedir(log_dir)
+        logger = SummaryWriter(log_dir)
         print(args)
-
-    milestones = list(map(lambda x: int(x) * len(train_loader), args.lr_idx.split(':')[0].split(',')))
-    gamma = float(args.lr_idx.split(':')[1])
-    scheduler = get_step_schedule_with_warmup(optimizer=optimizer, milestones=milestones, gamma=gamma)
 
     loss_weights = list(map(float, args.loss_weights.split(',')))
     num_batches_train = len(train_loader)
@@ -105,14 +118,14 @@ def main(args, model, optimizer, train_loader, train_sampler, val_loader, val_sa
 
     train = train_func(args, train_loader, model, optimizer, scheduler, loss_weights)
     validate =  validate_func(args, val_loader, model, loss_weights)
-    save_checkpoint = save_checkpoint_func(model, optimizer)
+    save_checkpoint = save_checkpoint_func(model, optimizer, scheduler)
 
     losses = {}
 
     with torch.profiler.profile(activities=profile_activity, schedule=profile_schedule, profile_memory=True,
                                 record_shapes=True,
-                                on_trace_ready=torch.profiler.tensorboard_trace_handler(args.save_dir)) as prof:
-        for epoch in range(args.epochs):
+                                on_trace_ready=torch.profiler.tensorboard_trace_handler(log_dir)) as prof:
+        for epoch in torch.arange(initial_epoch, args.epochs):
             if is_distributed:
                 train_sampler.set_epoch(epoch)
                 val_sampler.set_epoch(epoch)
@@ -123,7 +136,7 @@ def main(args, model, optimizer, train_loader, train_sampler, val_loader, val_sa
 
             #save snapshot of model
             if local_rank == 0 and (epoch + 1) * args.save_freq == 0:
-                save_checkpoint(args.save_path, epoch)
+                save_checkpoint(checkpoint_dir, epoch)
 
             #validation
             if(epoch + 1) % args.eval_freq == 0 or (epoch +1) == args.epochs:
@@ -140,6 +153,8 @@ def main(args, model, optimizer, train_loader, train_sampler, val_loader, val_sa
 #TODO : test other images
 def train_func(args, train_loader, model, optimizer, scheduler, loss_weights):
     num_batches_train = len(train_loader)
+    save_checkpoint = save_checkpoint_func(model, optimizer, scheduler)#todo remove
+    checkpoint_dir = os.path.join(args.save_dir, 'checkpoints') #todo remove
     def train(logger, log_index, epoch, profiler):
         model.train()
         total_loss = 0.0
@@ -177,6 +192,8 @@ def train_func(args, train_loader, model, optimizer, scheduler, loss_weights):
                                                            scalar_summary["4mm_avg of avg errs of valid predictions"],
                                                            scalar_summary["4mm_avg accuracy"],
                                                            time.time() - initialTime))
+
+                    save_checkpoint(checkpoint_dir, epoch)#todo remove
 
                 del scalar_summary, image_summary
 
@@ -232,15 +249,6 @@ def multi_stage_loss(outputs, depth_gts, masks, weights):
     return total_loss
 
 
-def save_checkpoint_func(model, optimizer):
-    def save_checkpoint(checkpoint_path, epoch):
-        torch.save({'epoch': epoch + 1,
-                    'model': model.module.state_dict(),
-                    'optimizer': optimizer.state_dict()}, f'{checkpoint_path}/model_{epoch + 1:06d}.ckpt')
-
-    return save_checkpoint
-
-
 if __name__=='__main__':
-    model, optimizer, train_loader, train_sampler, val_loader, val_sampler = initialize()
-    main(args, model, optimizer, train_loader, train_sampler, val_loader, val_sampler)
+    model, optimizer, scheduler, epoch, loader_data = initialize()
+    main(args, model, optimizer, scheduler, epoch, loader_data)

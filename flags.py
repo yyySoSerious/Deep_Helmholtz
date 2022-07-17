@@ -2,19 +2,20 @@ import argparse
 
 class TrainFlags:
     def __init__(self):
-        self.parser = argparse.ArgumentParser(description="Deep Helmholtz Stereopsis")
+        self.parser = argparse.ArgumentParser(description="Training Helmholtz Network")
         self.setup()
 
     def setup(self):
         # File paths Arguments
-        self.parser.add_argument('--root_dir', type=str, help='path to root directory.')
+        self.parser.add_argument('--root_dir', type=str, help='path to root directory')
         self.parser.add_argument('--train_list', type=str, help='Path to list of train objects',
                             default='Deep_Helmholtz/Dataset/train.txt')
         self.parser.add_argument('--val_list', type=str, help='Path to list of validation objects',
                                  default='Deep_Helmholtz/Dataset/val.txt')
-        self.parser.add_argument('--save_dir', type=str, help='path to save checkpoints.')
+        self.parser.add_argument('--save_dir', type=str, help='path to save checkpoints')
 
         # Training Arguments
+        self.parser.add_argument('--ckpt_to_continue', type=str, default=None)
         self.parser.add_argument('--epochs', type=int, default=60)
         self.parser.add_argument('--lr', type=float, default=0.0016)
         self.parser.add_argument('--lr_decay', type=float, default=0.0, help='weight decay')
@@ -42,5 +43,27 @@ class TrainFlags:
         self.args = self.parser.parse_args()
         return self.args
 
+
 class TestFlags:
-    pass
+    def __init__(self):
+        self.parser = argparse.ArgumentParser(description="Testing Helmholtz Network")
+        self.setup()
+
+    def setup(self):
+        # File paths Arguments
+        self.parser.add_argument('--root_dir', type=str, help='path to root directory')
+        self.parser.add_argument('--test_list', type=str, help='Path to list of train objects',
+                                 default='Deep_Helmholtz/Dataset/test.txt')
+        self.parser.add_argument('--save_dir', type=str, help='path to save depth maps')
+
+        # Testing Arguments
+        self.parser.add_argument('--ckpt', default=None)
+        self.parser.add_argument('--num_sel_views', type=int, help='num of candidate views', default=1)
+        self.parser.add_argument('--conf_lambda', type=float, help='the interval coefficient', default=1.5)
+        self.parser.add_argument('--planes_in_stages', type=str, help='number of samples for each stage.',
+                                 default='64,32,8')
+
+
+    def parse(self):
+        self.args = self.parser.parse_args()
+        return self.args
