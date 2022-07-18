@@ -11,7 +11,7 @@ local_rank = int(os.environ["LOCAL_RANK"])
 world_size = int(os.environ['WORLD_SIZE'])
 is_distributed = True if world_size > 1 and device_name == 'cuda' else False
 
-def get_summary(inputs, outputs):
+def mvs_get_summary(inputs, outputs):
     inferred_depth = outputs['stage3']['depth']
     depth_gt = inputs['depth_gts']['stage3']
     mask = inputs['masks']['stage3'].bool()
@@ -33,6 +33,23 @@ def get_summary(inputs, outputs):
         scalar_summary["{}mm_avg accuracy".format(int(threshold*1000))] = avg_accuracy
     if is_distributed: scalar_summary = avg_summary_processes(scalar_summary)
     return dict_to_numpy(image_summary), dict_to_float(scalar_summary)
+
+def ps_get_summary(inputs, output):
+    inferred_normal = output
+    normal_gt = inputs['normal_gt']
+    mask = inputs['masks']['stage3'].bool()
+
+    ref_images = inputs['imgs'][:, 0]
+
+    image_summary = {"inferred_normal": inferred_normal,
+                     "normal_gt": normal_gt,
+                     "mask": mask,
+                     "ref_views": ref_images
+                     }
+
+    scalar_summary = calNormalAcc(normal_gt, inferred_normal, mask)
+
+    return dict_to_numpy(image_summary), scalar_summary
 
 def avg_summary_processes(summary: dict):
     with torch.no_grad():
@@ -57,7 +74,7 @@ def add_summary(data_dict: dict, dtype: str, logger, index: int, flag: str):
             img = img.astype(np.float32)
         img = torch.from_numpy(img[:1])
         #Todo: Add value_range for the depth value
-        if 'depth' in name or 'label' in name or 'gt' in name:
+        if 'depth' in name or 'label' in name:
             return torchvision.utils.make_grid(img, padding=0, nrow=1, normalize=True, scale_each=True,
                                                value_range=(0, 2))
         elif 'mask' in name:

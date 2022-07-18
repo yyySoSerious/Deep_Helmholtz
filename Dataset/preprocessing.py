@@ -106,10 +106,13 @@ def load_depth_maps(path_to_depth_map:str):
     stage1_depth_map = cv2.resize(stage3_depth_map, (w//4, h//4), interpolation=cv2.INTER_NEAREST)
     return {'stage1': stage1_depth_map, 'stage2': stage2_depth_map, 'stage3': stage3_depth_map}
 
-#TODO: maybe, normalize data to [0 1]
 def get_image_data(data_dir: str):
     path_to_image = glob.glob(os.path.join(data_dir, '*_reciprocal0001.exr'))[0]
-    image = read_exr_image(path_to_image)
+    image = normalize_exr_image(read_exr_image(path_to_image))
+
+
+    path_to_normal = glob.glob(os.path.join(data_dir, '*_reciprocal_normal0001.exr'))[0]
+    normal = read_exr_image(path_to_normal)
 
     extrinsic_mat, intrinsic_mat = parse_cameras(data_dir)
     path_to_depth_range = glob.glob(os.path.join(data_dir, '*_depth_range.txt'))[0]
@@ -119,7 +122,7 @@ def get_image_data(data_dir: str):
     projection_mat[0, :4, :4] = extrinsic_mat
     projection_mat[1, :3, :3] = intrinsic_mat
 
-    return image, np.float32(min_depth), np.float32(max_depth), projection_mat
+    return image, normal, np.float32(min_depth), np.float32(max_depth), projection_mat
 
 
 def generate_masks(depth_maps:dict, min_depth, max_depth):

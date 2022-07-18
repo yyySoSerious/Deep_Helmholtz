@@ -32,7 +32,7 @@ class Helmholtz_Dataset(Dataset):
             view_id, reciprocal_id = image_ids[i].split('_')
             data_dir = os.path.join(self.root_dir, view['obj_dir'], f'view_{view_id}',
                                     self.reciprocals[reciprocal_id])
-            image, min_depth, max_depth, projection_mat = prep.get_image_data(data_dir)
+            image, normal, min_depth, max_depth, projection_mat = prep.get_image_data(data_dir)
 
             images.append(image)
             stage3_projection_mats.append(projection_mat)
@@ -44,13 +44,14 @@ class Helmholtz_Dataset(Dataset):
 
                     data['depth_gts'] = depth_maps
                     data['masks'] = masks
+                    data['normal_gt'] = normal.transpose([2, 0, 1])
                 data['depth_values'] = np.array([min_depth, max_depth], np.float32)
 
                 # add reciprocal to the src images
                 reciprocal_id = 'right' if reciprocal_id == 'left' else 'left'
                 data_dir = os.path.join(self.root_dir, view['obj_dir'], f'view_{view_id}',
                                         self.reciprocals[reciprocal_id])
-                image, min_depth, max_depth, projection_mat = prep.get_image_data(data_dir)
+                image, _, min_depth, max_depth, projection_mat = prep.get_image_data(data_dir)
 
                 images.append(image)
                 stage3_projection_mats.append(projection_mat)

@@ -39,6 +39,9 @@ class TrainFlags:
         self.parser.add_argument('--seed', type=int, default=0)
         self.parser.add_argument('--system', type=str, default='LINUX')
 
+
+        self.parser.add_argument('--net_type', type=str, help='the type of network to train', default='helmholtz')
+
     def parse(self):
         self.args = self.parser.parse_args()
         return self.args
@@ -62,6 +65,9 @@ class TestFlags:
         self.parser.add_argument('--conf_lambda', type=float, help='the interval coefficient', default=1.5)
         self.parser.add_argument('--planes_in_stages', type=str, help='number of samples for each stage.',
                                  default='64,32,8')
+
+
+        self.parser.add_argument('--net_type', type=str, help='the type of network to train', default='helmholtz')
 
 
     def parse(self):

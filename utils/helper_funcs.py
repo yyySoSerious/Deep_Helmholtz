@@ -1,6 +1,7 @@
 import torch
 from bisect import bisect_right
 from torch.optim.lr_scheduler import LambdaLR
+import numpy as np
 
 
 def get_step_schedule_with_warmup(optimizer, milestones, gamma=0.1, warmup_factor=1.0/3, warmup_iters=500, last_epoch=-1,):
@@ -122,3 +123,17 @@ class DictAverageMeter(object):
     def mean(self):
         return {k: v / self.count for k, v in self.data.items()}
 
+
+#todo:
+def calNormalAcc(gt_n, pred_n, mask=None):
+    """Tensor Dim: NxCxHxW"""
+    dot_product = (gt_n * pred_n).sum(1).clamp(-1,1)
+    error_map   = torch.acos(dot_product) # [-pi, pi]
+    angular_map = error_map * 180.0 / np.pi
+    angular_map = angular_map * mask.float()
+
+    valid = mask.sum()
+    ang_valid   = angular_map[mask]
+    n_err_mean  = ang_valid.sum() / valid
+    value = {'n_err_mean': n_err_mean.item()}
+    return value

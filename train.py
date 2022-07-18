@@ -4,13 +4,13 @@ import torch.nn as nn
 import torch.distributed as dist
 from torch.distributed.elastic.multiprocessing.errors import record
 from torch.distributed.optim import ZeroRedundancyOptimizer
-import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 from torch.profiler import ProfilerActivity
 
 import flags
 from utils.helper_funcs import *
-from utils.summary_recorder import get_summary, add_summary
+from losses import *
+from utils.summary_recorder import mvs_get_summary, ps_get_summary, add_summary
 from networks.helmholtz_network import HelmholtzNet
 from Dataset.helmholtz_dataset import Helmholtz_Dataset
 from Dataset.preprocessing import makedir
@@ -67,7 +67,7 @@ def initialize():
                                                             pin_memory=device_name != 'cpu')
 
     model = HelmholtzNet(planes_in_stages=list(map(int, args.planes_in_stages.split(','))),
-                         conf_lambda=args.conf_lambda)
+                         conf_lambda=args.conf_lambda, net_type=args.net_type)
 
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
                                  lr=args.lr, betas=(args.beta_1, args.beta_2), weight_decay=args.lr_decay)
@@ -153,11 +153,10 @@ def main(args, model, optimizer, scheduler, initial_epoch, loader_data):
 #TODO : test other images
 def train_func(args, train_loader, model, optimizer, scheduler, loss_weights):
     num_batches_train = len(train_loader)
-    save_checkpoint = save_checkpoint_func(model, optimizer, scheduler)#todo remove
-    checkpoint_dir = os.path.join(args.save_dir, 'checkpoints') #todo remove
     def train(logger, log_index, epoch, profiler):
         model.train()
         total_loss = 0.0
+        loss = None
         for batch_idx, sample in enumerate(train_loader):
             log_index += batch_idx
             initialTime = time.time()
@@ -169,8 +168,10 @@ def train_func(args, train_loader, model, optimizer, scheduler, loss_weights):
             outputs = model(sample['imgs'], sample['projection_mats'], sample['depth_values'])
             profiler.step()
             # print_dict(outputs)
-
-            loss = multi_stage_loss(outputs, sample['depth_gts'], sample['masks'], loss_weights)
+            if(args.net_type == 'mvs'):
+                loss = mvs_multi_stage_loss(outputs, sample['depth_gts'], sample['masks'], loss_weights)
+            elif (args.net_type == 'ps'):
+                loss = ps_cos_similarity_loss(outputs, sample['normal_gt'])
             total_loss += loss.item()
             if is_distributed and args.sync_bn:
                 with amp.scale_loss(loss, optimizer) as scaled_loss:
@@ -182,18 +183,28 @@ def train_func(args, train_loader, model, optimizer, scheduler, loss_weights):
             scheduler.step()
 
             if log_index % args.log_freq == 0:
-                image_summary, scalar_summary = get_summary(sample, outputs)
+                image_summary, scalar_summary = None, None
+                if args.net_type == 'mvs':
+                    image_summary, scalar_summary = mvs_get_summary(sample, outputs)
+                elif args.net_type == 'ps':
+                    image_summary, scalar_summary = ps_get_summary(sample, outputs)
                 if local_rank == 0:
                     add_summary(image_summary, 'image', logger, index=log_index, flag='train')
                     add_summary(scalar_summary, 'scalar', logger, index=log_index, flag='train')
-                    print("Epoch {}/{}, Iter {}/{}, lr {:.6f}, train loss {:.6f}, eval 4mm ({:.6f},"
-                          " {:.6f}), time = {:.2f}".format(epoch + 1, args.epochs, batch_idx + 1, num_batches_train,
-                                                           optimizer.param_groups[0]["lr"], loss,
-                                                           scalar_summary["4mm_avg of avg errs of valid predictions"],
-                                                           scalar_summary["4mm_avg accuracy"],
-                                                           time.time() - initialTime))
+                    if args.net_type == 'mvs' or args.net_type == 'helmholtz':
+                        print("Epoch {}/{}, Iter {}/{}, lr {:.6f}, train loss {:.6f}, eval 4mm ({:.6f},"
+                              " {:.6f}), time = {:.2f}".format(epoch + 1, args.epochs, batch_idx + 1, num_batches_train,
+                                                               optimizer.param_groups[0]["lr"], loss,
+                                                               scalar_summary["4mm_avg of avg errs of valid predictions"],
+                                                               scalar_summary["4mm_avg accuracy"],
+                                                               time.time() - initialTime))
+                    elif args.net_type == 'ps' or args.net_type == 'helmholtz':
+                        print("Epoch {}/{}, Iter {}/{}, lr {:.6f}, train loss {:.6f}, n_err_mean 4mm ({:.6f}),"
+                              " time = {:.2f}".format(epoch + 1, args.epochs, batch_idx + 1, num_batches_train,
+                                                               optimizer.param_groups[0]["lr"], loss,
+                                                               scalar_summary['n_err_mean'],
+                                                               time.time() - initialTime))
 
-                    save_checkpoint(checkpoint_dir, epoch)#todo remove
 
                 del scalar_summary, image_summary
 
@@ -214,7 +225,7 @@ def validate_func(args, val_loader, model, loss_weights):
             log_index += batch_idx
             sample = dict_to_device(sample, device)
             outputs = model(sample['imgs'], sample['projection_mats'], sample['depth_values'])
-            loss = multi_stage_loss(outputs, sample['depth_gts'], sample['masks'], loss_weights)
+            loss = mvs_multi_stage_loss(outputs, sample['depth_gts'], sample['masks'], loss_weights)
             total_loss += loss.item()
 
             image_summary, scalar_summary = get_summary(sample, outputs)
@@ -237,16 +248,6 @@ def validate_func(args, val_loader, model, loss_weights):
     return validate
 
 
-def multi_stage_loss(outputs, depth_gts, masks, weights):
-    total_loss = 0
-    for stage_idx in range(3):
-        inferred_depth = outputs[f'stage{stage_idx+1}']['depth']
-        depth_gt = depth_gts[f'stage{stage_idx+1}']
-        mask = masks[f'stage{stage_idx+1}'].bool()
-        depth_loss = F.smooth_l1_loss(inferred_depth[mask], depth_gt[mask], reduction='mean')
-        total_loss += depth_loss * weights[stage_idx]
-
-    return total_loss
 
 
 if __name__=='__main__':
