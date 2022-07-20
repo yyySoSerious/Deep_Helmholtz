@@ -9,14 +9,14 @@ case "${system_info}" in
     *)          system="UNKNOWN:${system_info}"
 esac
 
-train_script="/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Deep_Helmholtz/train.py"
-root_dir='/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src'
-save_dir='/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_save/ps2'
-ckpt='/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_save/mvs/checkpoints/model_000001.ckpt'
+#train_script="/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Deep_Helmholtz/train.py"
+#root_dir='/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src'
+#save_dir='/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_save/mvs2'
+#ckpt='/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_save/mvs/checkpoints/model_000001.ckpt'
 
-#train_script='Deep_Helmholtz/train.py'
-#root_dir=''
-#save_dir='Helmholtz_save/mvs'
+train_script='/vol/research/iview-data/Ope/Deep_Helmholtz/train.py'
+root_dir='/vol/research/iview-data/Ope/'
+save_dir='/vol/research/iview-data/Ope/Helmholtz_save/mvs'
 
 
 batch=2
@@ -31,7 +31,7 @@ JOB_ID=0
 torchrun  --standalone \
           --nnodes=1  \
           --nproc_per_node=$NUM_GPUS  \
-          $train_script --system ${system} --root_dir $root_dir --save_dir $save_dir --net_type 'ps' --batch $batch --epochs 10 --lr $lr \
+          $train_script --system ${system} --root_dir $root_dir --save_dir $save_dir --net_type 'mvs' --batch $batch --epochs 10 --lr $lr \
           --lr_idx '20, 30, 40, 50:0.625' --loss_weights '0.5, 1.0, 2.0' --num_sel_views 1 --conf_lambda 1.5 \
           --planes_in_stages '64, 32, 8' --sync_bn --log_freq 50
 

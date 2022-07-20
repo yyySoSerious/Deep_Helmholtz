@@ -32,9 +32,11 @@ class Helmholtz_Dataset(Dataset):
             view_id, reciprocal_id = image_ids[i].split('_')
             data_dir = os.path.join(self.root_dir, view['obj_dir'], f'view_{view_id}',
                                     self.reciprocals[reciprocal_id])
-            image, normal, min_depth, max_depth, projection_mat = prep.get_image_data(data_dir)
+            image, normal, min_depth, max_depth, projection_mat, light_pos = prep.get_image_data(data_dir, reciprocal_id)
+            light_pos = light_pos[np.newaxis, ...][np.newaxis, ...].repeat(512, axis=0).repeat(640, axis=1)
+            image_light = np.concatenate((image, light_pos), 2)
 
-            images.append(image)
+            images.append(image_light)
             stage3_projection_mats.append(projection_mat)
 
             if i == 0:
@@ -51,10 +53,13 @@ class Helmholtz_Dataset(Dataset):
                 reciprocal_id = 'right' if reciprocal_id == 'left' else 'left'
                 data_dir = os.path.join(self.root_dir, view['obj_dir'], f'view_{view_id}',
                                         self.reciprocals[reciprocal_id])
-                image, _, min_depth, max_depth, projection_mat = prep.get_image_data(data_dir)
+                image, _, min_depth, max_depth, projection_mat, light_pos = prep.get_image_data(data_dir, reciprocal_id)
+                light_pos = light_pos[np.newaxis, ...][np.newaxis, ...].repeat(512, axis=0).repeat(640, axis=1)
+                image_light = np.concatenate((image, light_pos), 2)
 
-                images.append(image)
+                images.append(image_light)
                 stage3_projection_mats.append(projection_mat)
+
 
             # print(projection_mat)
             # print(min_depth, max_depth)

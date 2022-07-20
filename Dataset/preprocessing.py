@@ -106,7 +106,7 @@ def load_depth_maps(path_to_depth_map:str):
     stage1_depth_map = cv2.resize(stage3_depth_map, (w//4, h//4), interpolation=cv2.INTER_NEAREST)
     return {'stage1': stage1_depth_map, 'stage2': stage2_depth_map, 'stage3': stage3_depth_map}
 
-def get_image_data(data_dir: str):
+def get_image_data(data_dir: str, reciprocal_id: str):
     path_to_image = glob.glob(os.path.join(data_dir, '*_reciprocal0001.exr'))[0]
     image = normalize_exr_image(read_exr_image(path_to_image))
 
@@ -122,7 +122,14 @@ def get_image_data(data_dir: str):
     projection_mat[0, :4, :4] = extrinsic_mat
     projection_mat[1, :3, :3] = intrinsic_mat
 
-    return image, normal, np.float32(min_depth), np.float32(max_depth), projection_mat
+    data_dir_reciprocal = os.path.join(os.path.split(data_dir)[0], 'left_reciprocal') if reciprocal_id == 'right' else\
+        os.path.join(os.path.split(data_dir)[0], 'right_reciprocal')
+    extr_mat_reciprocal, _ = parse_cameras(data_dir_reciprocal)
+
+    light_pos = -extr_mat_reciprocal[:3, :3].T @ extr_mat_reciprocal[:3, 3]
+    light_pos = light_pos/np.linalg.norm(light_pos)
+
+    return image, normal, np.float32(min_depth), np.float32(max_depth), projection_mat, np.float32(light_pos)
 
 
 def generate_masks(depth_maps:dict, min_depth, max_depth):

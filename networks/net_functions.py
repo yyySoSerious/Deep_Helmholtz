@@ -143,3 +143,33 @@ def depth_regression(prob_volume, depth_samples):
         depth_samples = depth_samples.view(*depth_samples.shape, 1, 1)
     depth = torch.sum(prob_volume * depth_samples, 1)
     return depth
+
+def warp(src_feat, src_proj, ref_proj):
+    batch, channels = src_feat.shape[0], src_feat.shape[1]
+    height, width = src_feat.shape[2], src_feat.shape[3]
+
+    with torch.no_grad():
+        proj = torch.matmul(src_proj, torch.inverse(ref_proj))
+        rot = proj[:, :3, :3]  # shape: (B, 3, 3)
+        trans = proj[:, :3, 3:4]  # shape: (B, 3, 1)
+
+        y, x = torch.meshgrid(torch.arange(0, height, dtype=torch.float32, device=src_feat.device),
+                              torch.arange(0, width, dtype=torch.float32, device=src_feat.device), indexing='ij')
+        y, x = y.contiguous(), x.contiguous()
+        y, x = y.view(height * width), x.view(height * width)  # shape: (HxW,), (HxW,)
+        xyz = torch.stack((x, y, torch.ones_like(x)))  # shape: (3, H*W)
+        xyz = xyz.unsqueeze(0).repeat(batch, 1, 1)  # shape: (B, 3, H*W)
+        rot_xyz = rot.matmul(xyz)  # shape: (B, 3, H*W]
+        proj_xyz = rot_xyz + trans  # shape: (B, 3, H*W)
+        proj_xy = proj_xyz[:, :2, :] / proj_xyz[:, 2:3, :]  # shape: (B, 2, H*W)
+        proj_x_normalized = proj_xy[:, 0, :] / ((width - 1) / 2) - 1  # shape: (B, H*W)
+        proj_y_normalized = proj_xy[:, 1, :] / ((height - 1) / 2) - 1  # shape: (B, H*W)
+        proj_xy = torch.stack((proj_x_normalized, proj_y_normalized), dim=2)  # shape: (B, H*W, 2)
+        grid = proj_xy
+
+    warped_src_feat = F.grid_sample(src_feat, grid.view(batch, height, width, 2), mode='bilinear',
+                                    padding_mode='zeros', align_corners=False)
+
+    warped_src_feat = warped_src_feat.view(batch, channels, height, width)
+
+    return warped_src_feat

@@ -17,7 +17,7 @@ def mvs_get_summary(inputs, outputs):
     mask = inputs['masks']['stage3'].bool()
 
     err_map = torch.abs(depth_gt - inferred_depth) * mask.float()
-    ref_images = inputs['imgs'][:, 0]
+    ref_images = inputs['imgs'][:, 0, :3]
 
     image_summary = {"inferred_depth": inferred_depth,
                      "depth_gt": depth_gt,
@@ -39,7 +39,7 @@ def ps_get_summary(inputs, output):
     normal_gt = inputs['normal_gt']
     mask = inputs['masks']['stage3'].bool()
 
-    ref_images = inputs['imgs'][:, 0]
+    ref_images = inputs['imgs'][:, 0, :3]
 
     image_summary = {"inferred_normal": inferred_normal,
                      "normal_gt": normal_gt,
@@ -83,6 +83,9 @@ def add_summary(data_dict: dict, dtype: str, logger, index: int, flag: str):
         elif 'error' in name:
             return torchvision.utils.make_grid(img, padding=0, nrow=1, normalize=True, scale_each=True,
                                                value_range=(0, 4))
+        elif 'normal' in name:
+            return torchvision.utils.make_grid(img, padding=0, nrow=1, normalize=True, scale_each=True,
+                                               value_range=(-1, 1))
         return torchvision.utils.make_grid(img, padding=0, nrow=1, normalize=True, scale_each=True,)
 
     if is_distributed and local_rank != 0:

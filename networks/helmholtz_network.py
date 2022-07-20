@@ -17,7 +17,7 @@ class HelmholtzNet(nn.Module):
         self.num_stages = len(planes_in_stages)
         self.scale_factors_inv = {'stage1': 4.0, 'stage2': 2.0, 'stage3': 1.0}
 
-        self.mvs_feature_extractor = mvs.FeatExtractorNet(base_channels=base_channels_per_stage[0],
+        self.mvs_feature_extractor = mvs.FeatExtractorNet(in_channels=3, base_channels=base_channels_per_stage[0],
                                                           num_stages=self.num_stages)
 
         if self.net_type == 'mvs' or self.net_type == 'helmholtz':
@@ -27,7 +27,7 @@ class HelmholtzNet(nn.Module):
 
         if self.net_type == 'ps' or self.net_type == 'helmholtz':
             self.ps_feature_extractor = ps.FeatExtractorNet(base_channels=base_channels_per_stage[0]*4)
-            self.ps_regressor = ps.RegressionNet(base_channels=base_channels_per_stage[0]*2)
+            self.ps_regressor = ps.RegressionNet(base_channels=base_channels_per_stage[0]+3, bn=True)#*2, bn=False)
 
     def mvs_forward(self, features, img, projection_mats, depth_values):
         mvs_outputs = {}
@@ -75,9 +75,26 @@ class HelmholtzNet(nn.Module):
 
         return mvs_outputs
 
-    def ps_forward(self, features):
-        l_feat, shape = self.ps_feature_extractor(features[0]['stage1'])
-        r_feat, shape = self.ps_feature_extractor(features[1]['stage1'])
+    def ps_forward(self, features, projection_mats, lights): #stage3 proj_mat
+        #todo delete
+        curr_stage_projection_mats = torch.unbind(projection_mats, 1)
+
+        ref_proj, src_proj = curr_stage_projection_mats[0], curr_stage_projection_mats[1]
+
+        src_proj_new = src_proj[:, 0].clone()
+        src_proj_new[:, :3, :4] = torch.matmul(src_proj[:, 1, :3, :3], src_proj[:, 0, :3])
+
+        ref_proj_new = ref_proj[:, 0].clone()
+        ref_proj_new[:, :3, :4] = torch.matmul(ref_proj[:, 1, :3, :3], ref_proj[:, 0, :3, :4])
+        l_feat = torch.cat((features[0]['stage3'], lights[:, 0,]), 1)
+        r_feat = features[1]['stage3']
+        r_feat = torch.cat((warp(r_feat, src_proj_new, ref_proj_new), lights[:, 1]), 1)
+        b, c, h, w = r_feat.shape
+        shape = [b, c, h, w]
+
+        #todo----------------
+        #l_feat, shape = self.ps_feature_extractor(features[0]['stage1'])
+       # r_feat, shape = self.ps_feature_extractor(features[1]['stage1'])
 
         pooled_feat, _ = torch.stack([l_feat, r_feat], 1).max(1)
         normal = self.ps_regressor(pooled_feat, shape)
@@ -95,6 +112,8 @@ class HelmholtzNet(nn.Module):
         '''
         outputs = {}
         features = []
+        lights = images[:, :, 3:, :, :]
+        images = images[:, :, :3, :, :]
         for idx in range(images.shape[1]):
             img = images[:, idx]
             features.append(self.mvs_feature_extractor(img))
@@ -105,7 +124,7 @@ class HelmholtzNet(nn.Module):
                 return outputs['mvs']
 
         if self.net_type == 'ps' or self.net_type == 'helmholtz':
-            outputs['ps'] = self.ps_forward(features[:2])
+            outputs['ps'] = self.ps_forward(features[:2], projection_mats['stage3'], lights)
             if self.net_type == 'ps':
                 return outputs['ps']
 

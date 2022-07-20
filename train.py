@@ -171,7 +171,7 @@ def train_func(args, train_loader, model, optimizer, scheduler, loss_weights):
             if(args.net_type == 'mvs'):
                 loss = mvs_multi_stage_loss(outputs, sample['depth_gts'], sample['masks'], loss_weights)
             elif (args.net_type == 'ps'):
-                loss = ps_cos_similarity_loss(outputs, sample['normal_gt'])
+                loss = ps_cos_similarity_loss(outputs, sample['normal_gt'], sample['masks']['stage3'])
             total_loss += loss.item()
             if is_distributed and args.sync_bn:
                 with amp.scale_loss(loss, optimizer) as scaled_loss:
@@ -199,7 +199,7 @@ def train_func(args, train_loader, model, optimizer, scheduler, loss_weights):
                                                                scalar_summary["4mm_avg accuracy"],
                                                                time.time() - initialTime))
                     elif args.net_type == 'ps' or args.net_type == 'helmholtz':
-                        print("Epoch {}/{}, Iter {}/{}, lr {:.6f}, train loss {:.6f}, n_err_mean 4mm ({:.6f}),"
+                        print("Epoch {}/{}, Iter {}/{}, lr {:.6f}, train loss {:.6f}, n_err_mean ({:.6f}),"
                               " time = {:.2f}".format(epoch + 1, args.epochs, batch_idx + 1, num_batches_train,
                                                                optimizer.param_groups[0]["lr"], loss,
                                                                scalar_summary['n_err_mean'],
@@ -228,7 +228,10 @@ def validate_func(args, val_loader, model, loss_weights):
             loss = mvs_multi_stage_loss(outputs, sample['depth_gts'], sample['masks'], loss_weights)
             total_loss += loss.item()
 
-            image_summary, scalar_summary = get_summary(sample, outputs)
+            if args.net_type == 'mvs':
+                image_summary, scalar_summary = mvs_get_summary(sample, outputs)
+            elif args.net_type == 'ps':
+                image_summary, scalar_summary = ps_get_summary(sample, outputs)
             avg_scalar_summary.update(scalar_summary)
 
             if log_index % args.log_freq == 0 and local_rank == 0:

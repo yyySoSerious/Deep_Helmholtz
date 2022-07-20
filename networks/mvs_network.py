@@ -3,14 +3,14 @@ import torch.nn as nn
 from . import layers
 
 class FeatExtractorNet(nn.Module):
-    def __init__(self, base_channels, num_stages=3):
+    def __init__(self, in_channels, base_channels, num_stages=3):
         super(FeatExtractorNet, self).__init__()
 
         self.base_channels = base_channels
         self.num_stages = num_stages
 
         self.conv0 = nn.Sequential(
-            layers.Conv2dLayer(3, base_channels, 3, 1, padding=1),
+            layers.Conv2dLayer(in_channels, base_channels, 3, 1, padding=1),
             layers.Conv2dLayer(base_channels, base_channels, 3, 1, padding=1)
         )
 
