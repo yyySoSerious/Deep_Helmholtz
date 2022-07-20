@@ -28,8 +28,8 @@ class RegressionNet(nn.Module):
         x = x.view(shape[0], shape[1], shape[2], shape[3])
         conv1 = self.conv1(x)
         conv2 = self.conv2(conv1)
-        test = self.conv2(conv2)
+        test = self.conv2(conv1)
         #deconv = self.deconv(conv2)
-        normal = self.conv3(test) #self.conv3(conv2) # self.conv3(deconv)
+        normal = self.conv3(conv2) # self.conv3(deconv)
         normal = torch.nn.functional.normalize(normal, 2, 1)
         return normal

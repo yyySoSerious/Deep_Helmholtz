@@ -127,9 +127,12 @@ def get_image_data(data_dir: str, reciprocal_id: str):
     extr_mat_reciprocal, _ = parse_cameras(data_dir_reciprocal)
 
     light_pos = -extr_mat_reciprocal[:3, :3].T @ extr_mat_reciprocal[:3, 3]
-    light_pos = light_pos/np.linalg.norm(light_pos)
+    light_pos = np.float32(light_pos/np.linalg.norm(light_pos))
+    cam_pos = -extrinsic_mat[:3, :3].T @ extrinsic_mat[:3, 3]
+    cam_pos = np.float32(cam_pos/np.linalg.norm(cam_pos))
+    light_pos = cam_pos * light_pos
 
-    return image, normal, np.float32(min_depth), np.float32(max_depth), projection_mat, np.float32(light_pos)
+    return image, normal, np.float32(min_depth), np.float32(max_depth), projection_mat, light_pos
 
 
 def generate_masks(depth_maps:dict, min_depth, max_depth):
