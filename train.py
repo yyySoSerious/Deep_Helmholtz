@@ -40,7 +40,7 @@ def print_peak_memory(prefix, device):
         print(f'{prefix}: {torch.cuda.max_memory_allocated(device) // 1e6}MB')
 
 
-def initialize():
+def initialize(args):
     initial_epoch = 0
     loader_data = {}
     train_set = Helmholtz_Dataset(root_dir=args.root_dir, path_to_obj_dir_list=args.train_list,
@@ -82,7 +82,7 @@ def initialize():
 
     model = model.to(device)
     if is_distributed:
-        if args.sync_ban:
+        if args.sync_bn:
                 model = apex.parallel.convert_syncbn_model(model)
                 model, optimizer = amp.initialize(model, optimizer, opt_level=args.opt_level)
 
@@ -125,7 +125,7 @@ def main(args, model, optimizer, scheduler, initial_epoch, loader_data):
     with torch.profiler.profile(activities=profile_activity, schedule=profile_schedule, profile_memory=True,
                                 record_shapes=True,
                                 on_trace_ready=torch.profiler.tensorboard_trace_handler(log_dir)) as prof:
-        for epoch in torch.arange(initial_epoch, args.epochs):
+        for epoch in np.arange(initial_epoch, args.epochs):
             if is_distributed:
                 train_sampler.set_epoch(epoch)
                 val_sampler.set_epoch(epoch)
@@ -254,5 +254,5 @@ def validate_func(args, val_loader, model, loss_weights):
 
 
 if __name__=='__main__':
-    model, optimizer, scheduler, epoch, loader_data = initialize()
+    model, optimizer, scheduler, epoch, loader_data = initialize(args)
     main(args, model, optimizer, scheduler, epoch, loader_data)

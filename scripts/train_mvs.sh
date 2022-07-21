@@ -18,7 +18,7 @@ esac
 
 train_script='/vol/research/iview-data/Ope/Deep_Helmholtz/train.py'
 root_dir='/vol/research/iview-data/Ope/'
-save_dir='/vol/research/iview-data/Ope/Helmholtz_save/mvs0'
+save_dir='/vol/research/iview-data/Ope/Helmholtz_save/mvs'
 train_list='/vol/research/iview-data/Ope/Deep_Helmholtz/Dataset/train.txt'
 val_list='/vol/research/iview-data/Ope/Deep_Helmholtz/Dataset/val.txt'
 
