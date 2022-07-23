@@ -126,6 +126,7 @@ def main(args, model, optimizer, scheduler, initial_epoch, loader_data):
                                 record_shapes=True,
                                 on_trace_ready=torch.profiler.tensorboard_trace_handler(log_dir)) as prof:
         for epoch in np.arange(initial_epoch, args.epochs):
+            epoch = epoch.item()
             if is_distributed:
                 train_sampler.set_epoch(epoch)
                 val_sampler.set_epoch(epoch)
@@ -228,6 +229,7 @@ def validate_func(args, val_loader, model, loss_weights):
             loss = mvs_multi_stage_loss(outputs, sample['depth_gts'], sample['masks'], loss_weights)
             total_loss += loss.item()
 
+            image_summary, scalar_summary = None, None
             if args.net_type == 'mvs':
                 image_summary, scalar_summary = mvs_get_summary(sample, outputs)
             elif args.net_type == 'ps':
@@ -254,5 +256,7 @@ def validate_func(args, val_loader, model, loss_weights):
 
 
 if __name__=='__main__':
+    print('Initializing...')
     model, optimizer, scheduler, epoch, loader_data = initialize(args)
+    print('Initialization complete..')
     main(args, model, optimizer, scheduler, epoch, loader_data)
