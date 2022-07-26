@@ -1,5 +1,6 @@
 import os, time, gc
 os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
+os.environ['TORCH_DISTRIBUTED_DEBUG'] = 'DETAIL'
 import torch.nn as nn
 import torch.distributed as dist
 from torch.distributed.elastic.multiprocessing.errors import record
@@ -42,6 +43,7 @@ def print_peak_memory(prefix, device):
 
 def initialize(args):
     initial_epoch = 0
+    optim_state, scheduler_state = None, None
     loader_data = {}
     train_set = Helmholtz_Dataset(root_dir=args.root_dir, path_to_obj_dir_list=args.train_list,
                                   num_sel_views=args.num_sel_views)
@@ -77,7 +79,7 @@ def initialize(args):
 
     if args.ckpt_to_continue:
         print(f'Loading model {args.ckpt_to_continue} to continue training...')
-        initial_epoch = load_checkpoint(args.ckpt_to_continue, model, optimizer, scheduler)
+        initial_epoch, optim_state, scheduler_state = load_checkpoint(args.ckpt_to_continue, model, optimizer, scheduler)
         print('Model loaded successfully')
 
     model = model.to(device)
@@ -86,11 +88,17 @@ def initialize(args):
                 model = apex.parallel.convert_syncbn_model(model)
                 model, optimizer = amp.initialize(model, optimizer, opt_level=args.opt_level)
 
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank)
-        optimizer = ZeroRedundancyOptimizer(model.parameters(), optimizer_class=torch.optim.Adam, lr=0.01)
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank,
+                                                          find_unused_parameters=True)
+        optimizer = ZeroRedundancyOptimizer(model.parameters(), optimizer_class=torch.optim.Adam, lr=args.lr)
+        scheduler = get_step_schedule_with_warmup(optimizer=optimizer, milestones=milestones, gamma=gamma)
+        if args.ckpt_to_continue:
+            optimizer.load_state_dict(optim_state)
+            scheduler.load_state_dict(scheduler_state)
 
     else:
         model = nn.DataParallel(model)
+
 
     print_peak_memory("Max memory allocated after creating local model", local_rank)
 
@@ -136,7 +144,8 @@ def main(args, model, optimizer, scheduler, initial_epoch, loader_data):
             losses['train_loss'] = train(logger, log_index, epoch, prof)
 
             #save snapshot of model
-            if local_rank == 0 and (epoch + 1) * args.save_freq == 0:
+            optimizer.consolidate_state_dict()
+            if local_rank == 0 and (epoch + 1) % args.save_freq == 0:
                 save_checkpoint(checkpoint_dir, epoch)
 
             #validation
@@ -148,6 +157,7 @@ def main(args, model, optimizer, scheduler, initial_epoch, loader_data):
             #record train and validation loss
             if local_rank == 0:
                 logger.add_scalars('train and val losses', losses, epoch+1)
+                print("Updated Train/Val loss graph...")
 
     dist.destroy_process_group()
 
@@ -221,12 +231,17 @@ def validate_func(args, val_loader, model, loss_weights):
     def validate(logger, log_index, epoch):
         model.eval()
         total_loss = 0.0
+        loss = None
         avg_scalar_summary = DictAverageMeter()
         for batch_idx, sample in enumerate(val_loader):
             log_index += batch_idx
             sample = dict_to_device(sample, device)
             outputs = model(sample['imgs'], sample['projection_mats'], sample['depth_values'])
-            loss = mvs_multi_stage_loss(outputs, sample['depth_gts'], sample['masks'], loss_weights)
+            # print_dict(outputs)
+            if (args.net_type == 'mvs'):
+                loss = mvs_multi_stage_loss(outputs, sample['depth_gts'], sample['masks'], loss_weights)
+            elif (args.net_type == 'ps'):
+                loss = ps_cos_similarity_loss(outputs, sample['normal_gt'], sample['masks']['stage3'])
             total_loss += loss.item()
 
             image_summary, scalar_summary = None, None
@@ -247,7 +262,6 @@ def validate_func(args, val_loader, model, loss_weights):
             add_summary(avg_scalar_summary.mean(), 'scalar', logger, index=epoch + 1, flag='brief')
 
         gc.collect()
-
         return total_loss / num_batches_val
 
     return validate

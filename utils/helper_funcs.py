@@ -30,13 +30,14 @@ def save_checkpoint_func(model, optimizer, scheduler):
 def load_checkpoint(checkpoint_path, model, optimizer=None, scheduler=None, device=torch.device('cpu')):
     state_dict = torch.load(checkpoint_path, device)
     model.load_state_dict(state_dict['model'])
-
+    optim_state = state_dict['optimizer']
+    scheduler_state = state_dict['scheduler']
     if optimizer:
-        optimizer.load_state_dict(state_dict['optimizer'])
+        optimizer.load_state_dict(optim_state)
     if scheduler:
-        scheduler.load_state_dict(state_dict['scheduler'])
+        scheduler.load_state_dict(scheduler_state)
 
-    return state_dict['epoch']
+    return state_dict['epoch'], optim_state, scheduler_state
 
 
 def print_dict(data: dict, prefix: str= ''):
@@ -135,5 +136,5 @@ def calNormalAcc(gt_n, pred_n, mask=None):
     valid = mask.sum()
     ang_valid   = angular_map[mask]
     n_err_mean  = ang_valid.sum() / valid
-    value = {'n_err_mean': n_err_mean.item()}
+    value = {'n_err_mean': n_err_mean}
     return value

@@ -48,8 +48,9 @@ def ps_get_summary(inputs, output):
                      }
 
     scalar_summary = calNormalAcc(normal_gt, inferred_normal, mask)
+    if is_distributed: scalar_summary = avg_summary_processes(scalar_summary)
 
-    return dict_to_numpy(image_summary), scalar_summary
+    return dict_to_numpy(image_summary), dict_to_float(scalar_summary)
 
 def avg_summary_processes(summary: dict):
     with torch.no_grad():

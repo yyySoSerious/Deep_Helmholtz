@@ -21,6 +21,7 @@ root_dir='/vol/research/iview-data/Ope/'
 save_dir='/vol/research/iview-data/Ope/Helmholtz_save/mvs'
 train_list='/vol/research/iview-data/Ope/Deep_Helmholtz/Dataset/train.txt'
 val_list='/vol/research/iview-data/Ope/Deep_Helmholtz/Dataset/val.txt'
+ckpt='/vol/research/iview-data/Ope/Helmholtz_save/mvs/checkpoints/model_000001.ckpt'
 
 
 batch=2
@@ -38,5 +39,4 @@ torchrun  --standalone \
           $train_script --system ${system} --root_dir $root_dir --save_dir $save_dir --train_list $train_list \
           --val_list $val_list --net_type 'mvs' --batch $batch --epochs 10 --lr $lr \
           --lr_idx '20, 30, 40, 50:0.625' --loss_weights '0.5, 1.0, 2.0' --num_sel_views 1 --conf_lambda 1.5 \
-          --planes_in_stages '64, 32, 8' --sync_bn --log_freq 50
-
+          --planes_in_stages '64, 32, 8' --sync_bn --log_freq 50 --ckpt_to_continue $ckpt

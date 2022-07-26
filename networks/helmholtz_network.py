@@ -26,7 +26,7 @@ class HelmholtzNet(nn.Module):
                                         base_channels=self.base_channels_per_stage[i]) for i in range(self.num_stages)])
 
         if self.net_type == 'ps' or self.net_type == 'helmholtz':
-            self.ps_feature_extractor = ps.FeatExtractorNet(base_channels=base_channels_per_stage[0]*4)
+           # self.ps_feature_extractor = ps.FeatExtractorNet(base_channels=base_channels_per_stage[0]*4)
             self.ps_regressor = ps.RegressionNet(base_channels=base_channels_per_stage[0]+3, bn=True)#*2, bn=False)
 
     def mvs_forward(self, features, img, projection_mats, depth_values):
