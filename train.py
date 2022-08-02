@@ -62,43 +62,49 @@ def initialize(args):
 
     loader_data['train_sampler'] = train_sampler
     loader_data['val_sampler'] = val_sampler
-    loader_data['train_loader'] = torch.utils.data.DataLoader(train_set, args.batch, sampler=train_sampler, num_workers=1,
-                                               drop_last=True, shuffle=train_sampler is None, pin_memory=True)
-    loader_data['val_loader'] = torch.utils.data.DataLoader(val_set, args.batch, sampler=val_sampler, num_workers=1,
-                                               drop_last=True, shuffle=val_sampler is None,
+    loader_data['train_loader'] = torch.utils.data.DataLoader(train_set, args.batch, sampler=train_sampler,
+                                                              num_workers=args.num_workers, drop_last=True,
+                                                              shuffle=train_sampler is None, pin_memory=True)
+    loader_data['val_loader'] = torch.utils.data.DataLoader(val_set, args.batch, sampler=val_sampler,
+                                                            num_workers=args.num_workers, drop_last=True,
+                                                            shuffle=val_sampler is None,
                                                             pin_memory=device_name != 'cpu')
 
     model = HelmholtzNet(planes_in_stages=list(map(int, args.planes_in_stages.split(','))),
                          conf_lambda=args.conf_lambda, net_type=args.net_type)
 
+    if args.ckpt_to_continue:
+        print(f'Loading model {args.ckpt_to_continue} to continue training...')
+        initial_epoch, optim_state, scheduler_state = load_checkpoint(args.ckpt_to_continue, model)
+        print('Model loaded successfully')
+
+    model = model.to(device)
+
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
                                  lr=args.lr, betas=(args.beta_1, args.beta_2), weight_decay=args.lr_decay)
     milestones = list(map(lambda x: int(x) * len(loader_data['train_loader']), args.lr_idx.split(':')[0].split(',')))
     gamma = float(args.lr_idx.split(':')[1])
-    scheduler = get_step_schedule_with_warmup(optimizer=optimizer, milestones=milestones, gamma=gamma)
+    scheduler = get_step_schedule_with_warmup(optimizer=optimizer, milestones=milestones, gamma=gamma,
+                                              last_epoch=initial_epoch-1)
 
-    if args.ckpt_to_continue:
-        print(f'Loading model {args.ckpt_to_continue} to continue training...')
-        initial_epoch, optim_state, scheduler_state = load_checkpoint(args.ckpt_to_continue, model, optimizer, scheduler)
-        print('Model loaded successfully')
-
-    model = model.to(device)
     if is_distributed:
         if args.sync_bn:
                 model = apex.parallel.convert_syncbn_model(model)
                 model, optimizer = amp.initialize(model, optimizer, opt_level=args.opt_level)
 
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank,
-                                                          find_unused_parameters=True)
-        optimizer = ZeroRedundancyOptimizer(model.parameters(), optimizer_class=torch.optim.Adam, lr=args.lr)
-        scheduler = get_step_schedule_with_warmup(optimizer=optimizer, milestones=milestones, gamma=gamma)
-        if args.ckpt_to_continue:
-            optimizer.load_state_dict(optim_state)
-            scheduler.load_state_dict(scheduler_state)
+                                                          find_unused_parameters=args.net_type == 'ps')
+        optimizer = ZeroRedundancyOptimizer(model.parameters(), optimizer_class=torch.optim.Adam, lr=args.lr,
+                                            betas=(args.beta_1, args.beta_2), weight_decay=args.lr_decay)
+        scheduler = get_step_schedule_with_warmup(optimizer=optimizer, milestones=milestones, gamma=gamma,
+                                                  last_epoch=initial_epoch-1)
 
     else:
         model = nn.DataParallel(model)
 
+    if args.ckpt_to_continue:
+        optimizer.load_state_dict(optim_state)
+        scheduler.load_state_dict(scheduler_state)
 
     print_peak_memory("Max memory allocated after creating local model", local_rank)
 
@@ -144,7 +150,8 @@ def main(args, model, optimizer, scheduler, initial_epoch, loader_data):
             losses['train_loss'] = train(logger, log_index, epoch, prof)
 
             #save snapshot of model
-            optimizer.consolidate_state_dict()
+            if is_distributed:
+                optimizer.consolidate_state_dict()
             if local_rank == 0 and (epoch + 1) % args.save_freq == 0:
                 save_checkpoint(checkpoint_dir, epoch)
 
@@ -164,7 +171,7 @@ def main(args, model, optimizer, scheduler, initial_epoch, loader_data):
 #TODO : test other images
 def train_func(args, train_loader, model, optimizer, scheduler, loss_weights):
     num_batches_train = len(train_loader)
-    def train(logger, log_index, epoch, profiler):
+    def train(logger, log_index, epoch, profiler=None):
         model.train()
         total_loss = 0.0
         loss = None
@@ -177,7 +184,7 @@ def train_func(args, train_loader, model, optimizer, scheduler, loss_weights):
             optimizer.zero_grad(set_to_none=True)
 
             outputs = model(sample['imgs'], sample['projection_mats'], sample['depth_values'])
-            profiler.step()
+            if profiler: profiler.step()
             # print_dict(outputs)
             if(args.net_type == 'mvs'):
                 loss = mvs_multi_stage_loss(outputs, sample['depth_gts'], sample['masks'], loss_weights)
@@ -206,7 +213,7 @@ def train_func(args, train_loader, model, optimizer, scheduler, loss_weights):
                         print("Epoch {}/{}, Iter {}/{}, lr {:.6f}, train loss {:.6f}, eval 4mm ({:.6f},"
                               " {:.6f}), time = {:.2f}".format(epoch + 1, args.epochs, batch_idx + 1, num_batches_train,
                                                                optimizer.param_groups[0]["lr"], loss,
-                                                               scalar_summary["4mm_avg of avg errs of valid predictions"],
+                                                               scalar_summary["4mm_mean err of valid predictions"],
                                                                scalar_summary["4mm_avg accuracy"],
                                                                time.time() - initialTime))
                     elif args.net_type == 'ps' or args.net_type == 'helmholtz':

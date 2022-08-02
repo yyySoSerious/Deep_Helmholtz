@@ -24,6 +24,7 @@ class TrainFlags:
         self.parser.add_argument('--beta_2', type=float, default=0.999, help='adam')
         self.parser.add_argument('--loss_weights', type=str, default="0.5,1.0,2.0")
         self.parser.add_argument('--batch', type=int, default=1)
+        self.parser.add_argument('--num_workers', type=int, default=1)
 
         # ucs args
         self.parser.add_argument('--num_sel_views', type=int, help='num of candidate views', default=1)
@@ -37,10 +38,10 @@ class TrainFlags:
         self.parser.add_argument('--sync_bn', action='store_true', help='Sync BN.')
         self.parser.add_argument('--opt_level', type=str, default="O0")
         self.parser.add_argument('--seed', type=int, default=0)
-        self.parser.add_argument('--system', type=str, default='LINUX')
 
 
         self.parser.add_argument('--net_type', type=str, help='the type of network to train', default='helmholtz')
+
 
     def parse(self):
         self.args = self.parser.parse_args()

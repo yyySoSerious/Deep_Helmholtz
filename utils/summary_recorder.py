@@ -18,9 +18,9 @@ def mvs_get_summary(inputs, outputs):
 
     err_map = torch.abs(depth_gt - inferred_depth) * mask.float()
     ref_images = inputs['imgs'][:, 0, :3]
-
-    image_summary = {"inferred_depth": inferred_depth,
-                     "depth_gt": depth_gt,
+    depth_range = inputs['depth_values']
+    image_summary = {"inferred_depth": [inferred_depth, depth_range],
+                     "depth_gt": [depth_gt, depth_range],
                      "mask": mask,
                      "error": err_map,
                      "ref_views": ref_images
@@ -29,8 +29,8 @@ def mvs_get_summary(inputs, outputs):
     scalar_summary = {}
     for threshold in [0.002, 0.003, 0.004, 0.02]:#[2, 3, 4, 20]:
         avg_of_avg_errs_valid, avg_accuracy = evaluate(inferred_depth, depth_gt, mask, threshold)
-        scalar_summary["{}mm_avg of avg errs of valid predictions".format(int(threshold*1000))] = avg_of_avg_errs_valid
-        scalar_summary["{}mm_avg accuracy".format(int(threshold*1000))] = avg_accuracy
+        scalar_summary['{}mm_mean err of valid predictions'.format(int(threshold*1000))] = avg_of_avg_errs_valid
+        scalar_summary['{}mm_avg accuracy'.format(int(threshold*1000))] = avg_accuracy
     if is_distributed: scalar_summary = avg_summary_processes(scalar_summary)
     return dict_to_numpy(image_summary), dict_to_float(scalar_summary)
 
@@ -67,6 +67,10 @@ def avg_summary_processes(summary: dict):
 
 def add_summary(data_dict: dict, dtype: str, logger, index: int, flag: str):
     def preprocess(name, img):
+        depth_range = None
+        if 'depth' in name or 'label' in name:
+            depth_range = img[1][0]
+            img = img[0]
         if not (len(img.shape) == 3 or len(img.shape) == 4):
             raise NotImplementedError("invalid img shape {}:{} in save_images".format(name, img.shape))
         if len(img.shape) == 3:
@@ -77,7 +81,7 @@ def add_summary(data_dict: dict, dtype: str, logger, index: int, flag: str):
         #Todo: Add value_range for the depth value
         if 'depth' in name or 'label' in name:
             return torchvision.utils.make_grid(img, padding=0, nrow=1, normalize=True, scale_each=True,
-                                               value_range=(0, 2))
+                                               value_range=tuple(depth_range))
         elif 'mask' in name:
             return torchvision.utils.make_grid(img, padding=0, nrow=1, normalize=True, scale_each=True,
                                                value_range=(0, 1))

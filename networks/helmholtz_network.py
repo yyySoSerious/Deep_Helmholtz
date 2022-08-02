@@ -26,6 +26,7 @@ class HelmholtzNet(nn.Module):
                                         base_channels=self.base_channels_per_stage[i]) for i in range(self.num_stages)])
 
         if self.net_type == 'ps' or self.net_type == 'helmholtz':
+            #self.unet = ps.UNet(in_channels= 8+3, base_channels=8, bn=True)
            # self.ps_feature_extractor = ps.FeatExtractorNet(base_channels=base_channels_per_stage[0]*4)
             self.ps_regressor = ps.RegressionNet(base_channels=base_channels_per_stage[0]+3, bn=True)#*2, bn=False)
 
@@ -76,6 +77,13 @@ class HelmholtzNet(nn.Module):
         return mvs_outputs
 
     def ps_forward(self, features, projection_mats, lights): #stage3 proj_mat
+        '''
+
+        :param features: shape: (B, C, H, W)
+        :param projection_mats: shape = (B, num_src_images + 1, 2, 4, 4)
+        :param lights: shape =  (B, num_src_images + 1, 3, H, W)
+        :return:
+        '''
         #todo delete
         curr_stage_projection_mats = torch.unbind(projection_mats, 1)
 
@@ -97,6 +105,7 @@ class HelmholtzNet(nn.Module):
        # r_feat, shape = self.ps_feature_extractor(features[1]['stage1'])
 
         pooled_feat, _ = torch.stack([l_feat, r_feat], 1).max(1)
+        #normal = self.unet(pooled_feat)
         normal = self.ps_regressor(pooled_feat, shape)
 
         return normal
@@ -119,7 +128,7 @@ class HelmholtzNet(nn.Module):
             features.append(self.mvs_feature_extractor(img))
 
         if self.net_type == 'mvs' or self.net_type == 'helmholtz':
-            outputs['mvs'] = self.mvs_forward(features, images[:, idx], projection_mats, depth_values)
+            outputs['mvs'] = self.mvs_forward(features, images[:, 0], projection_mats, depth_values)
             if self.net_type == 'mvs':
                 return outputs['mvs']
 

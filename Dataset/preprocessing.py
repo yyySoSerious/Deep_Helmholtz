@@ -122,15 +122,7 @@ def get_image_data(data_dir: str, reciprocal_id: str):
     projection_mat[0, :4, :4] = extrinsic_mat
     projection_mat[1, :3, :3] = intrinsic_mat
 
-    data_dir_reciprocal = os.path.join(os.path.split(data_dir)[0], 'left_reciprocal') if reciprocal_id == 'right' else\
-        os.path.join(os.path.split(data_dir)[0], 'right_reciprocal')
-    extr_mat_reciprocal, _ = parse_cameras(data_dir_reciprocal)
-
-    light_pos = -extr_mat_reciprocal[:3, :3].T @ extr_mat_reciprocal[:3, 3]
-    light_pos = np.float32(light_pos/np.linalg.norm(light_pos))
-    cam_pos = -extrinsic_mat[:3, :3].T @ extrinsic_mat[:3, 3]
-    cam_pos = np.float32(cam_pos/np.linalg.norm(cam_pos))
-    light_pos = cam_pos * light_pos
+    light_pos = np.loadtxt(glob.glob(os.path.join(data_dir, '*_light_position.txt'))[0],delimiter=',', dtype="float32")
 
     return image, normal, np.float32(min_depth), np.float32(max_depth), projection_mat, light_pos
 
@@ -155,12 +147,12 @@ if __name__ == '__main__':
     #print('extrinsic matrix', extrinsic, 'shape:', extrinsic.shape)
     #print('intrinsic matrix', intrinsic, 'shape:', intrinsic.shape)
 
-    image = read_exr_image("/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_dataset/03325088/ee9f4810517891d6c36fb70296e45483/view_4/right_reciprocal/r_reciprocal0001.exr")
-    tensor_img = torch.from_numpy(image.transpose(2, 0, 1)).unsqueeze(0)
-    print('the size of this tensor image is: ', tensor_img.shape)
-    this = torch.nn.functional.interpolate(tensor_img, [800, 1500]).squeeze(0)
-    print(this.shape)
-    image = this.numpy()
-    image = image.transpose(1, 2, 0)
+    image = read_exr_image("/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Build_helmholtz_v2/tmp/view_8/0001.exr")
+    #tensor_img = torch.from_numpy(image.transpose(2, 0, 1)).unsqueeze(0)
+    #print('the size of this tensor image is: ', tensor_img.shape)
+    #this = torch.nn.functional.interpolate(tensor_img, [800, 1500]).squeeze(0)
+    #print(this.shape)
+    #image = this.numpy()
+    #image = image.transpose(1, 2, 0)
     imshow_exr("imae", image)
     cv2.waitKey()

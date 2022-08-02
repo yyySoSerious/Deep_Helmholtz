@@ -66,6 +66,8 @@ def dict_to_numpy(data: dict):
     for k, v in data.items():
         if isinstance(v, dict):
             v = dict_to_numpy(v)
+        elif isinstance(v, list):
+            v = [v_.detach().cpu().numpy().copy() for v_ in v if isinstance(v_, torch.Tensor)]
         elif isinstance(v, torch.Tensor):
             v = v.detach().cpu().numpy().copy()
         new_dic[k] = v
