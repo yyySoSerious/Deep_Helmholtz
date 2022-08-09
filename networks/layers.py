@@ -17,7 +17,7 @@ class Conv2dLayer(nn.Module):
 
     def forward(self, x):
         x = self.conv(x)
-        if self.bn is not None:
+        if self.bn:
             x = self.bn(x)
         if self.stereo_type == 'mvs' and self.relu:
             x = F.relu_(x)
@@ -46,14 +46,14 @@ class Deconv2dLayer(nn.Module):
             if self.stride == 2:
                 h, w = list(x.size())[2:]
                 y = y[:, :, :2 * h, :2 * w].contiguous()
-            if self.bn is not None:
-                x = self.bn(y)
+            if self.bn:
+                y = self.bn(y)
             if self.relu:
-                x = F.relu_(x)
+                y = F.relu_(y)
         elif self.stereo_type == "ps":
-            x = F.leaky_relu_(y, 0.1)
+            y = F.leaky_relu_(y, 0.1)
 
-        return x
+        return y
 
 
 class Conv3dLayer(nn.Module):
@@ -71,7 +71,7 @@ class Conv3dLayer(nn.Module):
 
     def forward(self, x):
         x = self.conv(x)
-        if self.bn is not None:
+        if self.bn:
             x = self.bn(x)
         if self.relu:
             x = F.relu_(x)
@@ -92,7 +92,7 @@ class Deconv3dLayer(nn.Module):
 
     def forward(self, x):
         y = self.conv(x)
-        if self.bn is not None:
+        if self.bn:
             x = self.bn(y)
         if self.relu:
             x = F.relu_(x)
@@ -101,16 +101,15 @@ class Deconv3dLayer(nn.Module):
 
 
 class Deconv2dLayerPlus(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, relu=True, bn=True, bn_momnetum=0.1,
-                 add_type='channel_append'):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=2, stereo_type='mvs', relu=True, bn=True,
+                 bn_momnetum=0.1, add_type='channel_append'):
         super(Deconv2dLayerPlus, self).__init__()
 
-        self.deconv = Deconv2dLayer(in_channels, out_channels, kernel_size, stride=2, padding=1, output_padding=1,
-                                    bn=True, relu=relu, bn_momentum=bn_momnetum)
+        self.deconv = Deconv2dLayer(in_channels, out_channels, kernel_size, stride=stride, stereo_type=stereo_type,
+                                    padding=1, output_padding=1, bn=True, relu=relu, bn_momentum=bn_momnetum)
         self.add_type = add_type
 
     def forward(self, x_pre, x):
         x = self.deconv(x)
         x = x + x_pre if self.add_type == 'element_wise' else torch.cat((x, x_pre), dim=1)
-
         return x

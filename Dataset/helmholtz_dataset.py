@@ -1,69 +1,58 @@
-import os, glob
+import os, sys
+sys.path.append('.')
 import numpy as np
-
-import torch
 from torch.utils.data import Dataset
 
-from . import preprocessing as prep
+import Dataset.preprocessing as prep
 
-#TODO: send data directly to device
+
 class Helmholtz_Dataset(Dataset):
 
-    def __init__(self, root_dir, path_to_obj_dir_list, num_sel_views=1, mode='train'):
+    def __init__(self, root_dir, path_to_obj_dir_list, num_reciprocals=4, num_views=8, mode='train', net='mvs'):
         super(Helmholtz_Dataset, self).__init__()
 
         self.root_dir = root_dir
-        self.views_data = prep.parse_objs(self.root_dir, path_to_obj_dir_list, num_sel_views)
-        self.reciprocals = {'left': 'left_reciprocal',
-                            'right': 'right_reciprocal'}
+        self.views_data = prep.parse_views(self.root_dir, path_to_obj_dir_list, num_views)
+        self.num_reciprocals = num_reciprocals
         self.mode = mode
+        self.net = net
 
     def __len__(self):
         return len(self.views_data)
 
-    def __getitem__(self, idx):
+    def get_data(self, path_to_data, prefix, conc_light=False):
+        image, projection_mat, light_pos = prep.get_image_data(path_to_data, prefix)
+        if conc_light:
+            image = (image * np.random.uniform(1, 3)).clip(0, 2)
+            image =  prep.randomNoise(image)
+            light_pos = np.broadcast_to(light_pos, image.shape)
+            image_light = np.concatenate((image, light_pos), 2) #shape: (H, W, 6)
+
+            return image_light, projection_mat
+
+        return image, projection_mat
+
+
+    def mvs_get_item(self, data_dir):
         images = []
         stage3_projection_mats = []
         data = {}
 
-        view = self.views_data[idx]
-        image_ids = view['image_ids']
-        for i in range(len(image_ids)):
-            view_id, reciprocal_id = image_ids[i].split('_')
-            data_dir = os.path.join(self.root_dir, view['obj_dir'], f'view_{view_id}',
-                                    self.reciprocals[reciprocal_id])
-            image, normal, min_depth, max_depth, projection_mat, light_pos = prep.get_image_data(data_dir, reciprocal_id)
-            light_pos = light_pos[np.newaxis, ...][np.newaxis, ...].repeat(512, axis=0).repeat(640, axis=1)
-            image_light = np.concatenate((image, light_pos), 2)
+        path_to_depth_range = os.path.join(data_dir, 'depth_range.txt')
+        path_to_depth_map = os.path.join(data_dir, 'depth0001.exr')
 
-            images.append(image_light)
-            stage3_projection_mats.append(projection_mat)
+        image_light, projection_mat = self.get_data(data_dir, "")
+        min_depth, max_depth = np.float32(open(path_to_depth_range).readlines()[0].split())
+        images.append(image_light)
+        stage3_projection_mats.append(projection_mat)
 
-            if i == 0:
-                if self.mode == 'train':
-                    depth_maps = prep.load_depth_maps(glob.glob(os.path.join(data_dir, '*_reciprocal_depth0001.exr'))[0])
-                    masks = prep.generate_masks(depth_maps, min_depth, max_depth)
-
-                    data['depth_gts'] = depth_maps
-                    data['masks'] = masks
-                    data['normal_gt'] = normal.transpose([2, 0, 1])
-                data['depth_values'] = np.array([min_depth, max_depth], np.float32)
-
-                # add reciprocal to the src images
-                reciprocal_id = 'right' if reciprocal_id == 'left' else 'left'
-                data_dir = os.path.join(self.root_dir, view['obj_dir'], f'view_{view_id}',
-                                        self.reciprocals[reciprocal_id])
-                image, _, min_depth, max_depth, projection_mat, light_pos = prep.get_image_data(data_dir, reciprocal_id)
-                light_pos = light_pos[np.newaxis, ...][np.newaxis, ...].repeat(512, axis=0).repeat(640, axis=1)
-                image_light = np.concatenate((image, light_pos), 2)
+        data_dir = os.path.join(data_dir, 'reciprocals')
+        for i in range(self.num_reciprocals):
+            for j in range(2):
+                image_light, projection_mat = self.get_data(data_dir, f'{i + 1}_{j + 1}_')
 
                 images.append(image_light)
                 stage3_projection_mats.append(projection_mat)
-
-
-            # print(projection_mat)
-            # print(min_depth, max_depth)
-            # print(extrinsic_mat, intrinsic_mat)
 
         stage3_projection_mats = np.stack(stage3_projection_mats)
         stage2_projection_mats = stage3_projection_mats.copy()
@@ -77,6 +66,67 @@ class Helmholtz_Dataset(Dataset):
 
         data['imgs'] = images
         data['projection_mats'] = projection_mats
+        data['depth_values'] = np.array([min_depth, max_depth], np.float32)
+
+        if self.mode == 'train':
+            depth_maps = prep.load_depth_maps(path_to_depth_map)
+            masks = prep.generate_masks(depth_maps, min_depth, max_depth)
+
+            data['depth_gts'] = depth_maps
+            data['masks'] = masks
+
+        return data
+
+    def ps_get_item(self, data_dir):
+        data = {}
+        images = []
+        projection_mats = []
+
+        path_to_mask = os.path.join(data_dir, 'mask0001.exr')
+        path_to_normal = os.path.join(data_dir, 'normal0001.exr')
+
+        image_light, projection_mat = self.get_data(data_dir, '', conc_light=True)
+        images.append(image_light)
+        projection_mats.append(projection_mat)
+
+        data_dir = os.path.join(data_dir, 'reciprocals')
+        for i in range(self.num_reciprocals):
+            for j in range(2):
+                image_light, projection_mat = self.get_data(data_dir, f'{i + 1}_{j + 1}_', conc_light=True)
+
+                images.append(image_light)
+                projection_mats.append(projection_mat)
+
+        if self.mode == 'train':
+            mask = prep.read_exr_image(path_to_mask)
+            mask[mask != 1.0] = 0.0
+
+            normal = prep.read_exr_image(path_to_normal)
+            norm = np.sqrt((normal * normal).sum(2, keepdims=True))
+            normal = normal / (norm + 1e-12)
+
+
+            data['mask'] = mask[:, :, 1]
+            data['normal_gt'] = normal.transpose([2, 0, 1])
+
+        images = np.stack(images).transpose([0, 3, 1, 2]) #shape: (num_reciprocals + 1, 6, H, W)
+        projection_mats = np.stack(projection_mats)
+
+        data['imgs'] = images
+        data['projection_mats'] = projection_mats
+
+        return data
+
+    def __getitem__(self, idx):
+        view = self.views_data[idx]
+        data_dir = os.path.join(self.root_dir, view)
+
+        data = None
+        if self.net == 'mvs':
+            data = self.mvs_get_item(data_dir)
+        elif self.net == 'ps':
+            data = self.ps_get_item(data_dir)
+
         data['view'] = view
 
         return data
@@ -85,18 +135,27 @@ class Helmholtz_Dataset(Dataset):
 # For testing purposes
 if __name__ == '__main__':
     import cv2
-    dataset = Helmholtz_Dataset('../..', 'train.txt', 3)
+    train_list = '/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/downloads/' \
+                        'Helmholtz_dataset/ShapeNetSem/train.txt'
+    root_dir = '/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/downloads/' \
+                        'Helmholtz_dataset/'
+    dataset = Helmholtz_Dataset(root_dir, train_list)
     for index in range(len(dataset.views_data)):
         some_data = dataset.__getitem__(index)
         print(some_data['imgs'].shape)
+        print(some_data['normal_gt'].shape)
         print(some_data['view'])
         some_data['imgs'] = some_data['imgs'].transpose([0, 2, 3, 1])
+        some_data['normal_gt'] = some_data['normal_gt'].transpose([1, 2, 0])
         print([[f'stage{id +1}', some_data['projection_mats'][f'stage{id + 1}'].shape] for id in range(len(some_data['projection_mats']))])
         print(some_data['depth_values'])
-        #[cv2.imshow(f'test{id}',np.uint8(prep.normalize_exr_image(some_data['imgs'][id]))) for id in range(some_data['imgs'].shape[0])]
 
-        #[cv2.imshow(f'test{id}', some_data['depth_maps'][f'stage{id + 1}']) for id in range(len(some_data['depth_maps']))]
+        [prep.imshow_exr(f'test_image{id}',some_data['imgs'][id, :,:,:3]) for id in range(some_data['imgs'].shape[0])]
 
-        #[cv2.imshow(f'test{id}', some_data['masks'][f'stage{id + 1}']*255) for id in range(len(some_data['masks']))]
+        prep.imshow_exr(f'test_normal{id}', some_data['normal_gt'])
 
-        #cv2.waitKey()
+        [prep.imshow_exr(f'test_depth{id}', some_data['depth_gts'][f'stage{id + 1}']) for id in range(len(some_data['depth_gts']))]
+
+        [prep.imshow_exr(f'test_mask{id}', some_data['masks'][f'stage{id + 1}']) for id in range(len(some_data['masks']))]
+
+        cv2.waitKey()

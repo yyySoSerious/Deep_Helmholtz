@@ -3,7 +3,7 @@ os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
 import numpy as np
 
 import flags
-from utils.helper_funcs import *
+from utils.helper import *
 from networks.helmholtz_network import HelmholtzNet
 from Dataset.helmholtz_dataset import Helmholtz_Dataset
 from Dataset.preprocessing import makedir, normalize_exr_image, save_camera

@@ -26,10 +26,18 @@ class TrainFlags:
         self.parser.add_argument('--batch', type=int, default=1)
         self.parser.add_argument('--num_workers', type=int, default=1)
 
-        # ucs args
-        self.parser.add_argument('--num_sel_views', type=int, help='num of candidate views', default=1)
+        # mvs args
+        self.parser.add_argument('--num_reciprocals', type=int, help='num of candidate views', default=4)
         self.parser.add_argument('--conf_lambda', type=float, help='the interval coefficient', default=1.5)
         self.parser.add_argument('--planes_in_stages', type=str, help='number of samples for each stage.', default='64,32,8')
+
+        # ps args
+        self.parser.add_argument('--use_bn', default=False, action='store_true')
+        self.parser.add_argument('--fuse_type', default='max')
+        self.parser.add_argument('--rcpcl_fuse_type', default='max')
+        self.parser.add_argument('--base_channels', type=int, default=64)
+        self.parser.add_argument('--add_type', default='channel_append')
+
 
         self.parser.add_argument('--log_freq', type=int, default=50, help='print and summary frequency')
         self.parser.add_argument('--save_freq', type=int, default=1, help='save checkpoint frequency.')
@@ -41,6 +49,10 @@ class TrainFlags:
 
 
         self.parser.add_argument('--net_type', type=str, help='the type of network to train', default='helmholtz')
+        self.parser.add_argument('--ray_tune', default=False, action='store_true')
+        self.parser.add_argument('--experiment_name', default='my_experiment')
+        self.parser.add_argument('--resume', default=False, action='store_true')
+
 
 
     def parse(self):

@@ -1,10 +1,11 @@
 import torch
+import numpy as np
 from bisect import bisect_right
 from torch.optim.lr_scheduler import LambdaLR
-import numpy as np
 
 
-def get_step_schedule_with_warmup(optimizer, milestones, gamma=0.1, warmup_factor=1.0/3, warmup_iters=500, last_epoch=-1,):
+def get_step_schedule_with_warmup(optimizer, milestones, gamma=0.1, warmup_factor=1.0 / 3, warmup_iters=500,
+                                  last_epoch=-1, ):
     def lr_lambda(current_step):
         if current_step < warmup_iters:
             alpha = float(current_step) / warmup_iters
@@ -12,7 +13,7 @@ def get_step_schedule_with_warmup(optimizer, milestones, gamma=0.1, warmup_facto
         else:
             current_factor = 1.
 
-        return max(0.0,  current_factor * (gamma ** bisect_right(milestones, current_step)))
+        return max(0.0, current_factor * (gamma ** bisect_right(milestones, current_step)))
 
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
@@ -60,6 +61,7 @@ def dict_to_device(data: dict, device):
         new_dic[k] = v
 
     return new_dic
+
 
 def dict_to_numpy(data: dict):
     new_dic = {}
@@ -112,6 +114,7 @@ def evaluate(batch_depth_pred, batch_depth_gt, batch_mask, threshold):
     batch_accuracy = torch.stack(batch_accuracy)
     return batch_valid_avg_error.mean(), batch_accuracy.mean()
 
+
 class DictAverageMeter(object):
     def __init__(self):
         self.data = {}
@@ -127,8 +130,7 @@ class DictAverageMeter(object):
         return {k: v / self.count for k, v in self.data.items()}
 
 
-#todo:
-def calNormalAcc(gt_n, pred_n, mask=None):
+def calc_normal_acc(gt_n, pred_n, mask=None):
     """Tensor Dim: NxCxHxW"""
     dot_product = (gt_n * pred_n).sum(1).clamp(-1,1)
     error_map   = torch.acos(dot_product) # [-pi, pi]

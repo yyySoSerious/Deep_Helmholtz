@@ -19,11 +19,10 @@ def split_dataset(path_to_dataset_list:str, output_dir:str, train_ratio=0.70, va
 
     # create dataset list
     dataset_list = open(path_to_dataset_list).readlines()
-    dataset_list = list(map(lambda path: path.strip(), dataset_list))
-    num_objs = int(dataset_list[0])
+    dataset_list = list(map(lambda path: path.strip(), dataset_list))[1:]
+    num_objs = len(dataset_list)
 
     # shuffle list and split them according train ratio and val ratio
-    dataset_list = dataset_list[1:]
     random.shuffle(dataset_list)
     train_size = round(train_ratio * num_objs)
     val_size = round(val_ratio * num_objs)
@@ -47,22 +46,22 @@ def split_dataset(path_to_dataset_list:str, output_dir:str, train_ratio=0.70, va
         test_f.write('\n'.join(str(path) for path in dataset_list[val_end:]))
 
 
-def parse_cameras(camera_dir:str):
-    extrinsic_path = glob.glob(os.path.join(camera_dir, '*_RT_matrix.txt'))
-    intrinsic_path = glob.glob(os.path.join(camera_dir, '*_K_matrix.txt'))
-    extrinsic_mat = np.loadtxt(extrinsic_path[0])
+def parse_cameras(camera_dir: str, prefix: str):
+    extrinsic_path = os.path.join(camera_dir, f'{prefix}_RT_matrix.txt')
+    intrinsic_path = os.path.join(camera_dir, f'{prefix}_K_matrix.txt')
+    extrinsic_mat = np.loadtxt(extrinsic_path)
     extrinsic_mat = np.concatenate((extrinsic_mat, np.array([[0.0, 0.0, 0.0, 1.0]])))
-    intrinsic_mat = np.loadtxt(intrinsic_path[0])
+    intrinsic_mat = np.loadtxt(intrinsic_path)
 
     return extrinsic_mat, intrinsic_mat
+
 
 def save_camera(save_path, projection_mat):
     makedir(save_path)
     extrinsic_mat = projection_mat[0, :4, :4]
     intrinsic_mat = projection_mat[1, :3, :3]
-    np.savetxt(save_path + '/K_matrix.txt', np.matrix(intrinsic_mat))
-    np.savetxt(save_path + '/RT_matrix.txt', np.matrix(extrinsic_mat))
-
+    np.savetxt(os.path.join(save_path, 'K_matrix.txt'), np.matrix(intrinsic_mat))
+    np.savetxt(os.path.join(save_path, 'RT_matrix.txt'), np.matrix(extrinsic_mat))
 
 
 def read_exr_image(path_to_image:str):
@@ -99,6 +98,20 @@ def parse_objs(root_dir:str, path_to_obj_dir_list:str, num_sel_views):
 
     return views_data
 
+
+def parse_views(root_dir:str, path_to_obj_dir_list:str, num_views=8):
+    path_to_obj_dir_list = os.path.join(root_dir, path_to_obj_dir_list)
+    obj_dirs = open(path_to_obj_dir_list).readlines()
+    obj_dirs = list(map(lambda path: path.strip(), obj_dirs))[1:]
+
+    views_data = []
+    for obj_dir in obj_dirs:
+        for i in range(num_views):
+            views_data.append(os.path.join(obj_dir, f'view_{i+1}'))
+
+    return views_data
+
+
 def load_depth_maps(path_to_depth_map:str):
     stage3_depth_map = read_exr_image(path_to_depth_map)[:,:, 0]
     h, w = stage3_depth_map.shape
@@ -106,26 +119,22 @@ def load_depth_maps(path_to_depth_map:str):
     stage1_depth_map = cv2.resize(stage3_depth_map, (w//4, h//4), interpolation=cv2.INTER_NEAREST)
     return {'stage1': stage1_depth_map, 'stage2': stage2_depth_map, 'stage3': stage3_depth_map}
 
-def get_image_data(data_dir: str, reciprocal_id: str):
-    path_to_image = glob.glob(os.path.join(data_dir, '*_reciprocal0001.exr'))[0]
+def get_image_data(data_dir: str, prefix: str):
+    path_to_image = os.path.join(data_dir, f'{prefix}0001.exr')
     image = normalize_exr_image(read_exr_image(path_to_image))
 
-
-    path_to_normal = glob.glob(os.path.join(data_dir, '*_reciprocal_normal0001.exr'))[0]
-    normal = read_exr_image(path_to_normal)
-
-    extrinsic_mat, intrinsic_mat = parse_cameras(data_dir)
-    path_to_depth_range = glob.glob(os.path.join(data_dir, '*_depth_range.txt'))[0]
-    min_depth, max_depth = open(path_to_depth_range).readlines()[0].split()
+    extrinsic_mat, intrinsic_mat = parse_cameras(data_dir, prefix)
 
     projection_mat = np.zeros((2, 4, 4), np.float32)
     projection_mat[0, :4, :4] = extrinsic_mat
     projection_mat[1, :3, :3] = intrinsic_mat
 
-    light_pos = np.loadtxt(glob.glob(os.path.join(data_dir, '*_light_position.txt'))[0],delimiter=',', dtype="float32")
+    light_pos = np.loadtxt(os.path.join(data_dir, f'{prefix}_light_position.txt'), dtype='float32')
+    light_pos = light_pos/np.linalg.norm(light_pos)
 
-    return image, normal, np.float32(min_depth), np.float32(max_depth), projection_mat, light_pos
-
+    #light_pos = light_pos[np.newaxis, ...][np.newaxis, ...].repeat(image.shape[0], axis=0).repeat(image.shape[1], axis=1)
+    #image_light = np.concatenate((image, light_pos), 2)
+    return image, projection_mat, light_pos
 
 def generate_masks(depth_maps:dict, min_depth, max_depth):
     masks = {}
@@ -136,23 +145,31 @@ def generate_masks(depth_maps:dict, min_depth, max_depth):
         masks[stage] = mask
     return masks
 
+def randomNoise(image, factor=0.05):
+    noise = np.random.random(image.shape)
+    image += image + (noise - 0.5) * factor
+
+    return image
+
 
 # For testing purposes
 if __name__ == '__main__':
     root_dir = '../..'
-
+    path_to_objs_list = '/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_dataset/obj_dirs.txt'
+    save_path = '/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/test'
+    split_dataset(path_to_objs_list, save_path, train_ratio=0.01, val_ratio=0.01)
     #split_dataset('../../Helmholtz_dataset/obj_dirs.txt', '.')
 
     #extrinsic, intrinsic = parse_cameras('../../Helmholtz_dataset/03325088/1a5586fc147de3214b35a7d7cea7130/view_2/right_reciprocal')
     #print('extrinsic matrix', extrinsic, 'shape:', extrinsic.shape)
     #print('intrinsic matrix', intrinsic, 'shape:', intrinsic.shape)
 
-    image = read_exr_image("/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Build_helmholtz_v2/tmp/view_8/0001.exr")
+    #image = read_exr_image("/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Build_helmholtz_v2/tmp/view_8/0001.exr")
     #tensor_img = torch.from_numpy(image.transpose(2, 0, 1)).unsqueeze(0)
     #print('the size of this tensor image is: ', tensor_img.shape)
     #this = torch.nn.functional.interpolate(tensor_img, [800, 1500]).squeeze(0)
     #print(this.shape)
     #image = this.numpy()
     #image = image.transpose(1, 2, 0)
-    imshow_exr("imae", image)
-    cv2.waitKey()
+    #imshow_exr("imae", image)
+    #cv2.waitKey()
