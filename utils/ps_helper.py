@@ -1,17 +1,19 @@
-import time, gc
+import time, gc, sys
 import torch.nn.functional as F
 import torch.nn as nn
 from torch.distributed.optim import ZeroRedundancyOptimizer
+from ray import tune
+from torch import autograd
 
 from networks.ps_network import PsNet
-from utils.helper import Helper
+from utils.helper import Helper, Config
 from utils.utils import *
 
 class PSHelper(Helper):
-    def __init__(self, args, helper_args, config, in_channels=6):
+    def __init__(self, args, helper_args, config, in_channels=6, **kwargs):
         super(PSHelper, self).__init__(args, helper_args, config)
         optim_state, scheduler_state = None, None
-        self.model = PsNet(in_channels, self.args.base_channels, fuse_type=config['fuse_type'],
+        self.model = PsNet(in_channels, config['base_channels'], fuse_type=config['fuse_type'],
                            rcpcl_fuse_type=config['rcpcl_fuse_type'], add_type=config['add_type'], bn=config['use_bn'],
                            nn_layers=config['nn_layers'])
 
@@ -64,15 +66,27 @@ class PSHelper(Helper):
             self.optimizer.zero_grad(set_to_none=True)
             outputs = self.model(sample['imgs'], sample['projection_mats'])
 
-            # print_dict(outputs)
-            loss = self.loss(outputs, sample['normal_gt'], sample['mask'])
-            total_loss += loss.item()
-            if self.is_distributed and self.args.sync_bn:
-                with self.apex.amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                    scaled_loss.backward()
-            else:
-                loss.backward()
+            try:
+                # print_dict(outputs)
+                with autograd.set_detect_anomaly(True):
+                    loss = self.loss(outputs, sample['normal_gt'], sample['mask'])
+                    if torch.isnan(loss).any():
+                        raise RuntimeError(f"Can you please stop throwing nans? Thank you.")
 
+                    total_loss += loss.item()
+                    if self.is_distributed and self.args.sync_bn:
+                        with self.apex.amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                            scaled_loss.backward()
+                    else:
+                        loss.backward()
+            except RuntimeError as error:
+                print('----------------------------------------------------------------------', file=sys.stderr)
+                print(error, file=sys.stderr)
+                print(sample['view'], file=sys.stderr)
+                print('----------------------------------------------------------------------', file=sys.stderr)
+                Helper.getBack(loss.grad_fn)
+                print('----------------------------------------------------------------------', file=sys.stderr)
+                raise
             self.optimizer.step()
             self.scheduler.step()
 
@@ -103,15 +117,15 @@ class PSHelper(Helper):
             loss = self.loss(outputs, sample['normal_gt'], sample['mask'])
             total_loss += loss.item()
 
-            if logger:
-                image_summary, scalar_summary = self.get_summary(sample, outputs)
-                avg_scalar_summary.update(scalar_summary)
+            image_summary, scalar_summary = self.get_summary(sample, outputs)
+            avg_scalar_summary.update(scalar_summary)
 
+            if logger:
                 if log_index % self.args.log_freq == 0 and self.local_rank == 0:
                     self.add_summary(image_summary, 'image', logger, index=log_index, flag='val')
                     self.add_summary(scalar_summary, 'scalar', logger, index=log_index, flag='val')
 
-                del scalar_summary, image_summary
+            del scalar_summary, image_summary
 
         if self.local_rank == 0:
             print(f"Epoch {epoch +1}/{self.args.epochs}: {avg_scalar_summary.mean()}")
@@ -147,3 +161,23 @@ class PSHelper(Helper):
         if self.is_distributed: scalar_summary = self.avg_summary_processes(scalar_summary)
 
         return dict_to_numpy(image_summary), dict_to_float(scalar_summary)
+
+class PSConfig(Config):
+    def __init__(self):
+        super(PSConfig, self).__init__()
+        extra_config = {
+            'base_channels': tune.choice([64, 32, 16, 8, 4]),
+            'use_bn': tune.choice([True, False]),
+            'fuse_type': tune.choice(['mean', 'max']),
+            'rcpcl_fuse_type': tune.choice(['mean', 'max']),
+            'add_type': tune.choice(['channel_append', 'element_wise']),
+            'nn_layers': [
+                tune.choice([1, 2, 3]),
+                tune.choice([0, 1, 2, 3]),
+                tune.choice([0, 1, 2, 3]),
+                tune.choice([1, 2, 3]),
+                tune.choice([1, 2, 3]),
+                tune.choice([0, 1, 2, 3]),
+            ]
+        }
+        self.config.update(extra_config)

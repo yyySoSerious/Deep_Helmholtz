@@ -1,12 +1,14 @@
 import torch, torchvision
 import numpy as np
 import torch.distributed as dist
+from ray import tune
+import sys
 
 from Dataset.helmholtz_dataset import Helmholtz_Dataset
 
 
 class Helper:
-    def __init__(self, args, helper_args, config):
+    def __init__(self, args, helper_args, config, **kwargs):
         self.args = args
         self.local_rank = helper_args['local_rank']
         self.is_distributed = helper_args['is_distributed']
@@ -18,9 +20,9 @@ class Helper:
             self.apex = apex
 
         train_set = Helmholtz_Dataset(root_dir=self.args.root_dir, path_to_obj_dir_list=self.args.train_list,
-                                      num_reciprocals=self.args.num_reciprocals, net=self.args.net_type)
+                                      num_reciprocals=self.args.num_reciprocals, net=self.args.net_type, **kwargs)
         val_set = Helmholtz_Dataset(root_dir=self.args.root_dir, path_to_obj_dir_list=self.args.val_list,
-                                    num_reciprocals=self.args.num_reciprocals, net=self.args.net_type)
+                                    num_reciprocals=self.args.num_reciprocals, net=self.args.net_type, **kwargs)
 
         if self.is_distributed:
             torch.cuda.set_device(self.local_rank)
@@ -35,11 +37,11 @@ class Helper:
             self.train_sampler, self.val_sampler = None, None
 
         self.train_loader = torch.utils.data.DataLoader(train_set, config['batch'], sampler=self.train_sampler,
-                                                        num_workers=self.args.num_workers, drop_last=True,
+                                                        num_workers=2, drop_last=True,
                                                         shuffle=self.train_sampler is None,
                                                         pin_memory=self.device_name != 'cpu')
         self.val_loader = torch.utils.data.DataLoader(val_set, config['batch'], sampler=self.val_sampler,
-                                                      num_workers=self.args.num_workers, drop_last=True,
+                                                      num_workers=2, drop_last=True,
                                                       shuffle=self.val_sampler is None,
                                                       pin_memory=self.device_name != 'cpu')
 
@@ -118,3 +120,23 @@ class Helper:
             logger.add_scalars('train and val', data_dict, index)
         else:
             raise NotImplementedError
+
+    def getBack(var_grad_fn):
+        print(var_grad_fn, file=sys.stderr)
+        for n in var_grad_fn.next_functions:
+            if n[0]:
+                try:
+                    tensor = getattr(n[0], 'variable')
+                    print(n[0], file=sys.stderr)
+                    print('Tensor with grad found:', tensor, file=sys.stderr)
+                    print(' - gradient:', tensor.grad, file=sys.stderr)
+                    print(file=sys.stderr)
+                except AttributeError as e:
+                    Helper.getBack(n[0])
+
+class Config:
+    def __init__(self):
+        self.config = {
+            'batch': tune.choice([1, 2, 4, 8]),
+            'lr': tune.loguniform(1e-4, 1e-1), #5e-3, 5e-2)
+        }

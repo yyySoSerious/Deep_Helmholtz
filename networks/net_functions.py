@@ -170,6 +170,4 @@ def warp(src_feat, src_proj, ref_proj):
     warped_src_feat = F.grid_sample(src_feat, grid.view(batch, height, width, 2), mode='bilinear',
                                     padding_mode='zeros', align_corners=False)
 
-    warped_src_feat = warped_src_feat.view(batch, channels, height, width)
-
-    return warped_src_feat
+    return warped_src_feat.view(batch, channels, height, width)

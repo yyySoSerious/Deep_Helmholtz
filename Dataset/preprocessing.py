@@ -38,7 +38,6 @@ def split_dataset(path_to_dataset_list:str, output_dir:str, train_ratio=0.70, va
         train_f.write('\n'.join(str(path) for path in dataset_list[:train_size]))
 
         val_end = train_size + val_size
-        print(val_end)
         val_f.write(str(val_size) + '\n')
         val_f.write('\n'.join(str(path) for path in dataset_list[train_size:val_end]))
 
@@ -69,9 +68,9 @@ def read_exr_image(path_to_image:str):
         path_to_image, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
 
 
-def normalize_exr_image(image: str):
+def normalize_exr_image(image: np.ndarray):
     image = image - image.min()
-    return image / image.max()
+    return image / (image.max() +1e-12)
 
 
 def imshow_exr(window_name: str, image: np.ndarray):
@@ -107,17 +106,28 @@ def parse_views(root_dir:str, path_to_obj_dir_list:str, num_views=8):
     views_data = []
     for obj_dir in obj_dirs:
         for i in range(num_views):
-            views_data.append(os.path.join(obj_dir, f'view_{i+1}'))
+            views_data.append(os.path.join(obj_dir, f'view_{i + 1}'))
 
     return views_data
 
 
-def load_depth_maps(path_to_depth_map:str):
-    stage3_depth_map = read_exr_image(path_to_depth_map)[:,:, 0]
-    h, w = stage3_depth_map.shape
-    stage2_depth_map = cv2.resize(stage3_depth_map, (w//2, h//2), interpolation=cv2.INTER_NEAREST)
-    stage1_depth_map = cv2.resize(stage3_depth_map, (w//4, h//4), interpolation=cv2.INTER_NEAREST)
-    return {'stage1': stage1_depth_map, 'stage2': stage2_depth_map, 'stage3': stage3_depth_map}
+def load_depth_maps(path_to_depth_map:str, scale_factors, max_stages):
+    num_stages = len(scale_factors)
+    original_depth_map = read_exr_image(path_to_depth_map)[:,:, 0]
+    h, w = original_depth_map.shape
+    depth_maps = {}
+    #depth_maps[f'stage{num_stages}'] = original_depth_map
+    for i in range(num_stages):
+        if i == max_stages - 1:
+            depth_maps[f'stage{i + 1}'] = original_depth_map
+        else:
+            scale_factor = scale_factors[i]
+            depth_maps[f'stage{i + 1}'] = cv2.resize(original_depth_map, (w//scale_factor, h//scale_factor),
+                                                     interpolation=cv2.INTER_NEAREST)
+
+    #stage2_depth_map = cv2.resize(stage3_depth_map, (w//2, h//2), interpolation=cv2.INTER_NEAREST)
+    #stage1_depth_map = cv2.resize(stage3_depth_map, (w//4, h//4), interpolation=cv2.INTER_NEAREST)
+    return depth_maps #{'stage1': stage1_depth_map, 'stage2': stage2_depth_map, 'stage3': stage3_depth_map}
 
 def get_image_data(data_dir: str, prefix: str):
     path_to_image = os.path.join(data_dir, f'{prefix}0001.exr')
@@ -130,10 +140,8 @@ def get_image_data(data_dir: str, prefix: str):
     projection_mat[1, :3, :3] = intrinsic_mat
 
     light_pos = np.loadtxt(os.path.join(data_dir, f'{prefix}_light_position.txt'), dtype='float32')
-    light_pos = light_pos/np.linalg.norm(light_pos)
+    light_pos = light_pos/(np.linalg.norm(light_pos) +1e-12)
 
-    #light_pos = light_pos[np.newaxis, ...][np.newaxis, ...].repeat(image.shape[0], axis=0).repeat(image.shape[1], axis=1)
-    #image_light = np.concatenate((image, light_pos), 2)
     return image, projection_mat, light_pos
 
 def generate_masks(depth_maps:dict, min_depth, max_depth):
@@ -155,17 +163,23 @@ def randomNoise(image, factor=0.05):
 # For testing purposes
 if __name__ == '__main__':
     root_dir = '../..'
-    path_to_objs_list = '/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_dataset/obj_dirs.txt'
-    save_path = '/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/test'
-    split_dataset(path_to_objs_list, save_path, train_ratio=0.01, val_ratio=0.01)
+    #path_to_objs_list = '/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_dataset/obj_dirs.txt'
+    #save_path = '/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/test'
+    #split_dataset(path_to_objs_list, save_path, train_ratio=0.01, val_ratio=0.01)
     #split_dataset('../../Helmholtz_dataset/obj_dirs.txt', '.')
 
     #extrinsic, intrinsic = parse_cameras('../../Helmholtz_dataset/03325088/1a5586fc147de3214b35a7d7cea7130/view_2/right_reciprocal')
     #print('extrinsic matrix', extrinsic, 'shape:', extrinsic.shape)
     #print('intrinsic matrix', intrinsic, 'shape:', intrinsic.shape)
 
-    #image = read_exr_image("/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Build_helmholtz_v2/tmp/view_8/0001.exr")
+    #image = read_exr_image("/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_dataset/TissueBox/a65eb3d3898cdd9a48e2056fc010654d/view_6/normal0001.exr")
+
     #tensor_img = torch.from_numpy(image.transpose(2, 0, 1)).unsqueeze(0)
+    #if torch.isnan(tensor_img).any():
+     #   print('im nan bitch')
+    #else:
+     #   print('no nan :(')
+    #print(torch.isnan(tensor_img))
     #print('the size of this tensor image is: ', tensor_img.shape)
     #this = torch.nn.functional.interpolate(tensor_img, [800, 1500]).squeeze(0)
     #print(this.shape)

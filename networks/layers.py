@@ -42,14 +42,13 @@ class Deconv2dLayer(nn.Module):
 
     def forward(self, x):
         y = self.conv(x)
-        if self.stereo_type == "mvs":
-            if self.stride == 2:
-                h, w = list(x.size())[2:]
-                y = y[:, :, :2 * h, :2 * w].contiguous()
-            if self.bn:
-                y = self.bn(y)
-            if self.relu:
-                y = F.relu_(y)
+        if self.stride == 2:
+            h, w = list(x.size())[2:]
+            y = y[:, :, :2 * h, :2 * w].contiguous()
+        if self.bn:
+            y = self.bn(y)
+        if self.stereo_type == 'mvs' and self.relu:
+            y = F.relu_(y)
         elif self.stereo_type == "ps":
             y = F.leaky_relu_(y, 0.1)
 

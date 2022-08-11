@@ -5,8 +5,6 @@ from . import layers
 class FeatExtractorNet(nn.Module):
     def __init__(self, in_channels, base_channels, num_stages=3):
         super(FeatExtractorNet, self).__init__()
-
-        self.base_channels = base_channels
         self.num_stages = num_stages
 
         self.conv0 = nn.Sequential(
@@ -42,7 +40,7 @@ class FeatExtractorNet(nn.Module):
             self.out2 = nn.Conv2d(base_channels * 2, base_channels * 2, 1, bias=False)
 
             self.deconv2 = layers.Deconv2dLayerPlus(base_channels * 2, base_channels, 3)
-            self.out3_pre = layers.Conv2dLayer(base_channels *2, base_channels, 3, padding=1)
+            self.out3_pre = layers.Conv2dLayer(base_channels * 2, base_channels, 3, padding=1)
             self.out3 = nn.Conv2d(base_channels, base_channels, 1, bias=False)
             self.out_channels.append(2 * base_channels)
             self.out_channels.append(base_channels)
@@ -120,8 +118,6 @@ class CostRegularizerNet(nn.Module):
         return x
 
 import torch.nn as nn
-from . import mvs_network as mvs
-from . import ps_network as ps
 from .net_functions import *
 
 
@@ -135,13 +131,14 @@ class MVSNet(nn.Module):
         self.grad_method = grad_method
         self.base_channels_per_stage = base_channels_per_stage
         self.num_stages = len(planes_in_stages)
-        self.scale_factors_inv = {'stage1': 4.0, 'stage2': 2.0, 'stage3': 1.0}
+        max_stages = 3
+        self.scale_factors = [2**(max_stages-1) // 2**i for i in range(self.num_stages)]# {'stage1': 4.0, 'stage2': 2.0, 'stage3': 1.0}
 
         self.feature_extractor = FeatExtractorNet(in_channels=3, base_channels=base_channels_per_stage[0],
                                                           num_stages=self.num_stages)
 
         self.cost_regularizer = nn.ModuleList(
-            [mvs.CostRegularizerNet(in_channels=self.feature_extractor.out_channels[i],
+            [CostRegularizerNet(in_channels=self.feature_extractor.out_channels[i],
                                     base_channels=self.base_channels_per_stage[i]) for i in range(self.num_stages)])
 
     def forward(self, images, projection_mats, depth_values):
@@ -163,9 +160,9 @@ class MVSNet(nn.Module):
         for stage_num in range(self.num_stages):
             curr_stage_features = [feat[f'stage{stage_num + 1}'] for feat in features]
             curr_stage_projection_mats = projection_mats[f'stage{stage_num + 1}']
-            scale_factor_inv = self.scale_factors_inv[f'stage{stage_num + 1}']
-            curr_height = img.shape[2] // int(scale_factor_inv)
-            curr_width = img.shape[3] // int(scale_factor_inv)
+            scale_factor = self.scale_factors[stage_num] # self.scale_factors_inv[f'stage{stage_num + 1}']
+            curr_height = img.shape[2] // scale_factor # int(scale_factor_inv)
+            curr_width = img.shape[3] // scale_factor #int(scale_factor_inv)
 
             # Not the first stage
             if depth is not None:

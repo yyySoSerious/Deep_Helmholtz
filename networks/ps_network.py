@@ -52,13 +52,12 @@ class FeatExtractorNet(nn.Module):
         out1 = self.conv0(x)
         conv1 = self.conv1(out1)
         conv2 = self.conv2(conv1)
-        deconv = self.deconv(conv1, conv2)
-        out2 = self.conv3(deconv)
+        out2 = self.deconv(conv1, conv2)
+        out2 = self.conv3(out2)
 
         b, c, h, w = out2.data.shape
-        out2 = out2.view(-1)
 
-        return out1, out2, [b, c, h, w]
+        return out1, out2.view(-1), [b, c, h, w]
 
 
 class RegressionNet(nn.Module):
@@ -77,11 +76,11 @@ class RegressionNet(nn.Module):
         )
 
     def forward(self, x, pre):
-        conv0 = self.conv0(x)
-        deconv = self.deconv(pre, conv0)
+        out = self.conv0(x)
+        out = self.deconv(pre, out)
 
-        normal = self.conv1(deconv)
-        normal = torch.nn.functional.normalize(normal, 2, 1)
+        out = self.conv1(out)
+        normal = torch.nn.functional.normalize(out, 2, 1)
 
         return normal
 
@@ -118,15 +117,12 @@ class PsNet(nn.Module):
         return pooled_feat
 
     def pool_rcpcl_features(self, feat1, feat2, proj1, proj2, shape):
-        feat2 = warp(feat2, proj2, proj1)
         if feat1.dim() >1:
             feat1 = feat1.view(-1)
 
-        reciprocal_feats = [feat1, feat2.view(-1)]
-        pooled_reciprocal_feat = self.pool_features(reciprocal_feats, self.rcpcl_fuse_type)
-        pooled_reciprocal_feat = pooled_reciprocal_feat.view(shape[0], shape[1], shape[2], shape[3])
+        reciprocal_feats = [feat1, warp(feat2.view(shape[0], shape[1], shape[2], shape[3]), proj2, proj1).view(-1)]
 
-        return pooled_reciprocal_feat
+        return self.pool_features(reciprocal_feats, self.rcpcl_fuse_type).view(shape[0], shape[1], shape[2], shape[3])
 
     def forward(self, images, projection_mats):
         '''
@@ -140,16 +136,14 @@ class PsNet(nn.Module):
         shape = None
         lost_shape = None
         for idx in range(images.shape[1]):
-            img = images[:, idx]
-            lost_feat, feat, shape = self.feature_extractor(img)
+            lost_feat, feat, shape = self.feature_extractor(images[:, idx])
             features.append(feat)
             lost_features.append(lost_feat)
             lost_shape = lost_feat.shape
+            del feat, lost_feat
 
-        ref_feat = features[0]
-        feats = [ref_feat.view(-1)]
-        ref_lost_feat = lost_features[0]
-        lost_feats = [ref_lost_feat.view(-1)]
+        feats = [features[0].view(-1)]
+        lost_feats = [lost_features[0].view(-1)]
         projection_mats = torch.unbind(projection_mats, 1)
 
         for i in range(0, len(features) - 1, 2):
@@ -161,15 +155,11 @@ class PsNet(nn.Module):
             rcpcl1_proj_new = rcpcl1_proj[:, 0].clone()
             rcpcl1_proj_new[:, :3, :4] = torch.matmul(rcpcl1_proj[:, 1, :3, :3], rcpcl1_proj[:, 0, :3, :4])
 
-            rcpcl1_feat = features[i + 1]
-            rcpcl2_feat = features[i + 2].view(shape[0], shape[1], shape[2], shape[3])
-            pooled_reciprocal_feat = self.pool_rcpcl_features(rcpcl1_feat, rcpcl2_feat, rcpcl1_proj_new,
+            pooled_reciprocal_feat = self.pool_rcpcl_features(features[i + 1], features[i + 2], rcpcl1_proj_new,
                                                               rcpcl2_proj_new, shape)
 
-            rcpcl1_lost_feat = lost_features[i + 1]
-            rcpcl2_lost_feat = lost_features[i + 2]
-            pooled_reciprocal_lost_feat = self.pool_rcpcl_features(rcpcl1_lost_feat, rcpcl2_lost_feat, rcpcl1_proj_new,
-                                                                   rcpcl2_proj_new, lost_shape)
+            pooled_reciprocal_lost_feat = self.pool_rcpcl_features(lost_features[i + 1], lost_features[i + 2],
+                                                                   rcpcl1_proj_new, rcpcl2_proj_new, lost_shape)
 
             rcpcl1_proj_new[:, :3, :4] = torch.matmul(rcpcl1_proj[:, 1, :3, :3], rcpcl1_proj[:, 0, :3])
             ref_proj_new = ref_proj[:, 0].clone()
@@ -183,6 +173,5 @@ class PsNet(nn.Module):
         pooled_feat = self.pool_features(feats, self.fuse_type).view(shape[0], shape[1], shape[2], shape[3])
         pooled_lost_feat = self.pool_features(lost_feats, self.fuse_type).view(lost_shape[0], lost_shape[1], lost_shape[2],
                                                                lost_shape[3])
-        normal = self.regressor(pooled_feat, pooled_lost_feat)
 
-        return normal
+        return  self.regressor(pooled_feat, pooled_lost_feat)

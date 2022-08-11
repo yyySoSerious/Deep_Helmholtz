@@ -2,19 +2,28 @@ import time, gc
 import torch.nn.functional as F
 import torch.nn as nn
 from torch.distributed.optim import ZeroRedundancyOptimizer
+from ray import tune
+from torch import autograd
 
 from networks.mvs_network import MVSNet
-from utils.helper import Helper
+from utils.helper import Helper, Config
 from utils.utils import *
 
 class MVSHelper(Helper):
-    def __init__(self, args, helper_args, config):
-        super(MVSHelper, self).__init__(args, helper_args, config)
+    def __init__(self, args, helper_args, config, **kwargs):
+        planes = (config['num_planes1'], config['num_planes2'], config['num_planes3'])
+        planes_in_stages = planes[:config['num_stages']]
+        conf_lambda = config['conf_lambda']
+        self.num_stages = len(planes_in_stages)
+        super(MVSHelper, self).__init__(args, helper_args, config, num_stages=self.num_stages)
         self.loss_weights = list(map(float, self.args.loss_weights.split(',')))
         optim_state, scheduler_state = None, None
 
-        self.model = MVSNet(planes_in_stages=list(map(int, args.planes_in_stages.split(','))),
-                 conf_lambda=args.conf_lambda)
+        self.model = MVSNet(planes_in_stages=planes_in_stages,
+                 conf_lambda=conf_lambda)
+
+        #print(self.model)
+        #fsdfd
 
         if self.args.ckpt_to_continue:
             print(f'Loading model {self.args.ckpt_to_continue} to continue training...')
@@ -69,13 +78,14 @@ class MVSHelper(Helper):
             outputs = self.model(sample['imgs'], sample['projection_mats'], sample['depth_values'])
 
             # print_dict(outputs)
-            loss = self.loss(outputs, sample['depth_gts'], sample['masks'])
-            total_loss += loss.item()
-            if self.is_distributed and self.args.sync_bn:
-                with self.apex.amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                    scaled_loss.backward()
-            else:
-                loss.backward()
+            with autograd.set_detect_anomaly(True):
+                loss = self.loss(outputs, sample['depth_gts'], sample['masks'])
+                total_loss += loss.item()
+                if self.is_distributed and self.args.sync_bn:
+                    with self.apex.amp.scale_loss(loss, self.optimizer) as scaled_loss:
+                        scaled_loss.backward()
+                else:
+                    loss.backward()
 
             self.optimizer.step()
             self.scheduler.step()
@@ -99,7 +109,6 @@ class MVSHelper(Helper):
     def validate(self, logger, log_index, epoch):
         self.model.eval()
         total_loss = 0.0
-        loss = None
         avg_scalar_summary = DictAverageMeter()
         for batch_idx, sample in enumerate(self.val_loader):
             log_index += batch_idx
@@ -129,7 +138,7 @@ class MVSHelper(Helper):
 
     def loss(self, outputs, depth_gts: dict, masks: dict): #weighted l1 loss
         total_loss = 0
-        for stage_idx in range(3):
+        for stage_idx in range(self.num_stages):
             inferred_depth = outputs[f'stage{stage_idx + 1}']['depth']
             depth_gt = depth_gts[f'stage{stage_idx + 1}']
             mask = masks[f'stage{stage_idx + 1}'].bool()
@@ -139,9 +148,9 @@ class MVSHelper(Helper):
         return total_loss
 
     def get_summary(self, inputs, outputs):
-        inferred_depth = outputs['stage3']['depth']
-        depth_gt = inputs['depth_gts']['stage3']
-        mask = inputs['masks']['stage3'].bool()
+        inferred_depth = outputs[f'stage{self.num_stages}']['depth']
+        depth_gt = inputs['depth_gts'][f'stage{self.num_stages}']
+        mask = inputs['masks'][f'stage{self.num_stages}'].bool()
 
         err_map = torch.abs(depth_gt - inferred_depth) * mask.float()
         ref_images = inputs['imgs'][:, 0, :3]
@@ -160,3 +169,16 @@ class MVSHelper(Helper):
             scalar_summary['{}mm_avg accuracy'.format(int(threshold * 1000))] = avg_accuracy
         if self.is_distributed: scalar_summary = self.avg_summary_processes(scalar_summary)
         return dict_to_numpy(image_summary), dict_to_float(scalar_summary)
+
+class MVSConfig(Config):
+    def __init__(self):
+        super(MVSConfig, self).__init__()
+
+        extra_config = {
+            'conf_lambda': tune.loguniform(0.5, 4.0),
+            'num_stages': tune.choice([1, 2, 3]),
+            'num_planes1': tune.choice([256, 128, 64, 32, 16, 8]),
+            'num_planes2': tune.choice([128, 64, 32, 16, 8]),
+            'num_planes3':tune.choice([64, 32, 16, 8]),
+        }
+        self.config.update(extra_config)

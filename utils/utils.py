@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from bisect import bisect_right
 from torch.optim.lr_scheduler import LambdaLR
+from collections import OrderedDict
 
 
 def get_step_schedule_with_warmup(optimizer, milestones, gamma=0.1, warmup_factor=1.0 / 3, warmup_iters=500,
@@ -30,15 +31,20 @@ def save_checkpoint_func(model, optimizer, scheduler):
 
 def load_checkpoint(checkpoint_path, model, optimizer=None, scheduler=None, device=torch.device('cpu')):
     state_dict = torch.load(checkpoint_path, device)
-    model.load_state_dict(state_dict['model'])
-    optim_state = state_dict['optimizer']
-    scheduler_state = state_dict['scheduler']
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        name = k[7:]  # remove `module.`
+        new_state_dict[name] = v
+    # load params
+    model.load_state_dict(new_state_dict['model'])
+    optim_state = new_state_dict['optimizer']
+    scheduler_state = new_state_dict['scheduler']
     if optimizer:
         optimizer.load_state_dict(optim_state)
     if scheduler:
         scheduler.load_state_dict(scheduler_state)
 
-    return state_dict['epoch'], optim_state, scheduler_state
+    return new_state_dict['epoch'], optim_state, scheduler_state
 
 
 def print_dict(data: dict, prefix: str= ''):
@@ -137,8 +143,8 @@ def calc_normal_acc(gt_n, pred_n, mask=None):
     angular_map = error_map * 180.0 / np.pi
     angular_map = angular_map * mask.float()
 
-    valid = mask.sum()
+    valid = mask.float().sum()
     ang_valid   = angular_map[mask]
-    n_err_mean  = ang_valid.sum() / valid
+    n_err_mean  = ang_valid.sum() / (valid + 1e-12)
     value = {'n_err_mean': n_err_mean}
     return value

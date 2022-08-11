@@ -10,8 +10,8 @@ from ray.tune import CLIReporter
 from functools import partial
 
 import flags
-from utils.ps_helper import PSHelper
-from utils.mvs_helper import MVSHelper
+from utils.ps_helper import PSHelper, PSConfig
+from utils.mvs_helper import MVSHelper, MVSConfig
 from utils.utils import *
 from Dataset.preprocessing import makedir
 
@@ -58,21 +58,12 @@ def main(args):
             """
             return str(trial)
 
-        config = {
-            'batch': tune.choice([1, 2, 4, 8, 16]), 'lr': tune.loguniform(1e-4, 1e-1),
-            'use_bn': tune.choice([True, False]),
-            'fuse_type': tune.choice(['mean', 'max']),
-            'rcpcl_fuse_type': tune.choice(['mean', 'max']),
-            'add_type': tune.choice(['channel_append', 'element_wise']),
-            'nn_layers': [
-                tune.choice([1, 2, 3]),
-                tune.choice([0, 1, 2, 3]),
-                tune.choice([0, 1, 2, 3]),
-                tune.choice([1, 2, 3]),
-                tune.choice([1, 2, 3]),
-                tune.choice([0, 1, 2, 3]),
-            ]
-        }
+        helper_args = {'device_name': device_name, 'local_rank': local_rank, 'is_distributed': is_distributed}
+        config = None
+        if args.net_type == 'ps':
+            config = PSConfig().config
+        elif args.net_type == 'mvs':
+            config = MVSConfig().config
 
         algo = TuneBOHB(metric="loss", mode="min")
         bohb = HyperBandForBOHB(
@@ -83,14 +74,12 @@ def main(args):
 
         reporter = CLIReporter(
             metric_columns=['loss', 'info', 'training_iteration'])
-        import ray
-        ray.init(num_cpus=4)
         analysis = tune.run(
-            partial(train_tune, args=args),
+            partial(train_tune, args=args, helper_args=helper_args),
             local_dir=args.save_dir,
             name=args.experiment_name,
-            num_samples=2,
-            resources_per_trial= {'cpu': 2, 'memory': 2 * 1024 * 1024}, #{'gpu':1},
+            num_samples=20,
+            resources_per_trial= {'gpu': 1, 'cpu': args.num_workers*2} if device_name == 'cuda' else {'cpu': 2, 'memory': 2 * 1024 * 1024}, #,
             resume='AUTO',
             config=config, scheduler=bohb, search_alg=algo,
             progress_reporter=reporter,)
@@ -113,8 +102,13 @@ def train(args, logger, checkpoint_dir):
     helper = None
     helper_args = {'device_name': device_name, 'local_rank': local_rank, 'is_distributed': is_distributed}
     nn_layers = [3, 0, 0, 1, 2, 0]
-    config = {'batch': args.batch, 'lr': args.lr, 'use_bn': args.use_bn, 'fuse_type': args.fuse_type,
-              'rcpcl_fuse_type': args.rcpcl_fuse_type, 'add_type': args.add_type, 'nn_layers': nn_layers}
+    planes_in_stages = list(map(int, args.planes_in_stages.split(',')))
+    num_stages = len(planes_in_stages)
+    config = {'base_channels': args.base_channels, 'batch': args.batch, 'lr': args.lr, 'use_bn': args.use_bn,
+              'fuse_type': args.fuse_type, 'rcpcl_fuse_type': args.rcpcl_fuse_type, 'add_type': args.add_type,
+              'nn_layers': nn_layers, 'conf_lambda': args.conf_lambda, 'num_stages':num_stages,
+              'num_planes1': planes_in_stages[0], 'num_planes2': planes_in_stages[1] if num_stages > 1 else 0 ,
+              'num_planes3': planes_in_stages[2] if num_stages > 2 else 0}
 
     if args.net_type == 'ps':
         helper = PSHelper(args, helper_args, config)
@@ -157,11 +151,10 @@ def train(args, logger, checkpoint_dir):
             logger.add_scalars('Loss', losses, epoch + 1)
             print("Updated Train/Val loss graph...")
 
-def train_tune(config, checkpoint_dir=None, args=None):
-    tune.utils.wait_for_gpu()
+def train_tune(config, checkpoint_dir=None, args=None, helper_args=None):
+    if device_name == 'cuda': tune.utils.wait_for_gpu()
 
     helper = None
-    helper_args = {'device_name': device_name, 'local_rank': local_rank, 'is_distributed': is_distributed}
     if args.net_type == 'ps':
         helper = PSHelper(args, helper_args, config)
     elif args.net_type == 'mvs':
@@ -182,7 +175,7 @@ def train_tune(config, checkpoint_dir=None, args=None):
         # train
         print('Training...')
         log_index = (helper.num_batches_train + helper.num_batches_val) * epoch
-        train_loss = helper.train(None, log_index, epoch)
+        helper.train(None, log_index, epoch)
 
         # validation
         print('Validating...')

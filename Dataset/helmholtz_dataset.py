@@ -8,7 +8,7 @@ import Dataset.preprocessing as prep
 
 class Helmholtz_Dataset(Dataset):
 
-    def __init__(self, root_dir, path_to_obj_dir_list, num_reciprocals=4, num_views=8, mode='train', net='mvs'):
+    def __init__(self, root_dir, path_to_obj_dir_list, num_reciprocals=4, num_views=8, mode='train', net='mvs', **kwargs):
         super(Helmholtz_Dataset, self).__init__()
 
         self.root_dir = root_dir
@@ -16,6 +16,11 @@ class Helmholtz_Dataset(Dataset):
         self.num_reciprocals = num_reciprocals
         self.mode = mode
         self.net = net
+        if self.net == 'mvs':
+            self.max_stages = 3
+            num_stages = kwargs['num_stages']
+            self.num_stages = num_stages if num_stages else self.max_stages
+            self.scale_factors =[2**(self.max_stages-1) // 2**i for i in range(self.num_stages)]
 
     def __len__(self):
         return len(self.views_data)
@@ -35,7 +40,7 @@ class Helmholtz_Dataset(Dataset):
 
     def mvs_get_item(self, data_dir):
         images = []
-        stage3_projection_mats = []
+        original_projection_mats = []
         data = {}
 
         path_to_depth_range = os.path.join(data_dir, 'depth_range.txt')
@@ -44,7 +49,7 @@ class Helmholtz_Dataset(Dataset):
         image_light, projection_mat = self.get_data(data_dir, "")
         min_depth, max_depth = np.float32(open(path_to_depth_range).readlines()[0].split())
         images.append(image_light)
-        stage3_projection_mats.append(projection_mat)
+        original_projection_mats.append(projection_mat)
 
         data_dir = os.path.join(data_dir, 'reciprocals')
         for i in range(self.num_reciprocals):
@@ -52,15 +57,25 @@ class Helmholtz_Dataset(Dataset):
                 image_light, projection_mat = self.get_data(data_dir, f'{i + 1}_{j + 1}_')
 
                 images.append(image_light)
-                stage3_projection_mats.append(projection_mat)
+                original_projection_mats.append(projection_mat)
 
-        stage3_projection_mats = np.stack(stage3_projection_mats)
-        stage2_projection_mats = stage3_projection_mats.copy()
-        stage2_projection_mats[:, 1, :2, :3] = stage3_projection_mats[:, 1, :2, :3] / 2.
-        stage1_projection_mats = stage3_projection_mats.copy()
-        stage1_projection_mats[:, 1, :2, :3] = stage3_projection_mats[:, 1, :2, :3] / 4.
-        projection_mats = {'stage1': stage1_projection_mats, 'stage2': stage2_projection_mats,
-                           'stage3': stage3_projection_mats}
+        original_projection_mats = np.stack(original_projection_mats)
+        projection_mats = {}
+        for i in range(self.num_stages):
+            if i == self.max_stages-1:
+                projection_mats[f'stage{i + 1}'] = original_projection_mats
+            else:
+                scale_factor = self.scale_factors[i]
+                curr_stage_projection_mats = original_projection_mats.copy()
+                curr_stage_projection_mats[:, 1, :2, :3] = original_projection_mats[:, 1, :2, :3] /scale_factor
+                projection_mats[f'stage{i + 1}'] = curr_stage_projection_mats
+
+        #stage2_projection_mats = stage3_projection_mats.copy()
+        #stage2_projection_mats[:, 1, :2, :3] = stage3_projection_mats[:, 1, :2, :3] / 2.
+        #stage1_projection_mats = stage3_projection_mats.copy()
+        #stage1_projection_mats[:, 1, :2, :3] = stage3_projection_mats[:, 1, :2, :3] / 4.
+        #projection_mats = {'stage1': stage1_projection_mats, 'stage2': stage2_projection_mats,
+         #                  'stage3': stage3_projection_mats}
 
         images = np.stack(images).transpose([0, 3, 1, 2])
 
@@ -69,7 +84,7 @@ class Helmholtz_Dataset(Dataset):
         data['depth_values'] = np.array([min_depth, max_depth], np.float32)
 
         if self.mode == 'train':
-            depth_maps = prep.load_depth_maps(path_to_depth_map)
+            depth_maps = prep.load_depth_maps(path_to_depth_map, self.scale_factors, self.max_stages)
             masks = prep.generate_masks(depth_maps, min_depth, max_depth)
 
             data['depth_gts'] = depth_maps
