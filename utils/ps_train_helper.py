@@ -1,4 +1,4 @@
-import time, gc, sys
+import time, gc, sys, os
 import torch.nn.functional as F
 import torch.nn as nn
 from torch.distributed.optim import ZeroRedundancyOptimizer
@@ -6,23 +6,28 @@ from ray import tune
 from torch import autograd
 
 from networks.ps_network import PsNet
-from utils.helper import Helper, Config
+from utils.train_helper import Helper, Config
 from utils.utils import *
 
 class PSHelper(Helper):
     def __init__(self, args, helper_args, config, in_channels=6, **kwargs):
         super(PSHelper, self).__init__(args, helper_args, config)
-        optim_state, scheduler_state = None, None
+        optim_state, scheduler_state, scaler_state = None, None, None
         self.model = PsNet(in_channels, config['base_channels'], fuse_type=config['fuse_type'],
-                           rcpcl_fuse_type=config['rcpcl_fuse_type'], add_type=config['add_type'], bn=config['use_bn'],
+                           rcpcl_fuse_type=config['rcpcl_fuse_type'], add_type=config['add_type'], bn=args.use_bn,
                            nn_layers=config['nn_layers'])
 
         #print(self.model)
 
+        current_index = -1
         if self.args.ckpt_to_continue:
-            print(f'Loading model {self.args.ckpt_to_continue} to continue training...')
-            self.initial_epoch, optim_state, scheduler_state = load_checkpoint(self.args.ckpt_to_continue, self.model)
-            print('Model loaded successfully')
+            current_index = int(open(self.args.ckpt_to_continue).read())
+            if current_index > 0:
+                model_ckpt = f'model_{current_index:06d}.ckpt'
+                print(f'Loading model {model_ckpt} to continue training...')
+                self.initial_epoch, optim_state, scheduler_state, scaler_state = \
+                    load_checkpoint(os.path.join(args.save_dir, 'checkpoints', model_ckpt), self.model)
+                print('Model loaded successfully')
 
         self.model = self.model.to(self.device)
 
@@ -45,11 +50,12 @@ class PSHelper(Helper):
             self.scheduler = get_step_schedule_with_warmup(optimizer=self.optimizer, milestones=milestones, gamma=gamma)
 
         else:
-            self.model = nn.DataParallel(self.model)
+            self.model = nn.DataParallel(self.model, device_ids=range(torch.cuda.device_count()))
 
-        if self.args.ckpt_to_continue:
+        if self.args.ckpt_to_continue and current_index > 0:
             self.optimizer.load_state_dict(optim_state)
             self.scheduler.load_state_dict(scheduler_state)
+            self.scaler.load_state_dict(scaler_state)
 
     def initialize(self, loader_data: dict, model, optimizer, scheduler):
         pass
@@ -60,48 +66,45 @@ class PSHelper(Helper):
         for batch_idx, sample in enumerate(self.train_loader):
             log_index += batch_idx
             initialTime = time.time()
-            sample = dict_to_device(sample, self.device)
+            sample = dict_to_device(sample, self.device, self.device_name)
             # print_dict(sample, prefix='After being moved to device: ')
 
-            self.optimizer.zero_grad(set_to_none=True)
-            outputs = self.model(sample['imgs'], sample['projection_mats'])
+            with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=self.use_amp):
+                outputs = self.model(sample['imgs'], sample['projection_mats'])
+                loss = self.loss(outputs, sample['normal_gt'], sample['mask'])
+                total_loss += float(loss)
 
-            try:
-                # print_dict(outputs)
-                with autograd.set_detect_anomaly(True):
-                    loss = self.loss(outputs, sample['normal_gt'], sample['mask'])
-                    if torch.isnan(loss).any():
-                        raise RuntimeError(f"Can you please stop throwing nans? Thank you.")
+            if self.is_distributed:
+                if (batch_idx + 1) % 2 == 0 or (batch_idx + 1) == self.num_batches_train:
+                    self.scaler.scale(loss).backward()
+                else:
+                    with self.model.no_sync():
+                        self.scaler.scale(loss).backward()
+            else:
+                self.scaler.scale(loss).backward()
 
-                    total_loss += loss.item()
-                    if self.is_distributed and self.args.sync_bn:
-                        with self.apex.amp.scale_loss(loss, self.optimizer) as scaled_loss:
-                            scaled_loss.backward()
-                    else:
-                        loss.backward()
-            except RuntimeError as error:
-                print('----------------------------------------------------------------------', file=sys.stderr)
-                print(error, file=sys.stderr)
-                print(sample['view'], file=sys.stderr)
-                print('----------------------------------------------------------------------', file=sys.stderr)
-                Helper.getBack(loss.grad_fn)
-                print('----------------------------------------------------------------------', file=sys.stderr)
-                raise
-            self.optimizer.step()
-            self.scheduler.step()
+            if (batch_idx + 1) % 2 == 0 or (batch_idx + 1) == self.num_batches_train:
+                self.scaler.unscale_(self.optimizer)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.max_norm)
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+                self.scheduler.step()
+                self.optimizer.zero_grad(set_to_none=True)
 
-            if (log_index % self.args.log_freq == 0) and self.local_rank == 0:
+            if (log_index % self.args.log_freq == 0):
                 image_summary, scalar_summary = self.get_summary(sample, outputs)
-                print("Epoch {}/{}, Iter {}/{}, lr {:.6f}, train loss {:.6f}, n_err_mean ({:.6f}),"
-                          " time = {:.2f}".format(epoch + 1, self.args.epochs, batch_idx + 1, self.num_batches_train,
-                                                           self.optimizer.param_groups[0]["lr"], loss,
-                                                           scalar_summary['n_err_mean'],
-                                                           time.time() - initialTime))
-                if logger:
-                    self.add_summary(image_summary, 'image', logger, index=log_index, flag='train')
-                    self.add_summary(scalar_summary, 'scalar', logger, index=log_index, flag='train')
+                if self.local_rank == 0:
+                    if logger:
+                        self.add_summary(image_summary, 'image', logger, index=log_index, flag='train')
+                        self.add_summary(scalar_summary, 'scalar', logger, index=log_index, flag='train')
+                    print("Epoch {}/{}, Iter {}/{}, lr {:.6f}, train loss {:.6f}, n_err_mean ({:.6f}),"
+                              " time = {:.2f}".format(epoch + 1, self.args.epochs, batch_idx + 1, self.num_batches_train,
+                                                               self.optimizer.param_groups[0]["lr"], float(loss),
+                                                               scalar_summary['n_err_mean'],
+                                                               time.time() - initialTime))
+
                 del scalar_summary, image_summary
-        gc.collect()
+            gc.collect()
 
         return total_loss / self.num_batches_train
 
@@ -111,11 +114,14 @@ class PSHelper(Helper):
         avg_scalar_summary = DictAverageMeter()
         for batch_idx, sample in enumerate(self.val_loader):
             log_index += batch_idx
-            sample = dict_to_device(sample, self.device)
+            sample = dict_to_device(sample, self.device, self.device_name)
             outputs = self.model(sample['imgs'], sample['projection_mats'])
             # print_dict(outputs)
             loss = self.loss(outputs, sample['normal_gt'], sample['mask'])
-            total_loss += loss.item()
+            if torch.isnan(loss).any():
+                total_loss += sys.maxsize
+            else:
+                total_loss += float(loss)
 
             image_summary, scalar_summary = self.get_summary(sample, outputs)
             avg_scalar_summary.update(scalar_summary)
@@ -134,6 +140,7 @@ class PSHelper(Helper):
         gc.collect()
 
         return total_loss / self.num_batches_val, avg_scalar_summary.mean()
+
 
     def loss(self, output: torch.tensor, normal_gt: torch.tensor, mask: torch.tensor): #cos similarity loss
         mask = mask.bool()
@@ -167,7 +174,6 @@ class PSConfig(Config):
         super(PSConfig, self).__init__()
         extra_config = {
             'base_channels': tune.choice([64, 32, 16, 8, 4]),
-            'use_bn': tune.choice([True, False]),
             'fuse_type': tune.choice(['mean', 'max']),
             'rcpcl_fuse_type': tune.choice(['mean', 'max']),
             'add_type': tune.choice(['channel_append', 'element_wise']),
@@ -177,7 +183,7 @@ class PSConfig(Config):
                 tune.choice([0, 1, 2, 3]),
                 tune.choice([1, 2, 3]),
                 tune.choice([1, 2, 3]),
-                tune.choice([0, 1, 2, 3]),
+                tune.choice([1, 2, 3]),
             ]
         }
         self.config.update(extra_config)

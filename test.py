@@ -3,7 +3,7 @@ os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
 import numpy as np
 
 import flags
-from utils.helper import *
+from utils.utils import *
 from networks.helmholtz_network import HelmholtzNet
 from Dataset.helmholtz_dataset import Helmholtz_Dataset
 from Dataset.preprocessing import makedir, normalize_exr_image, save_camera
@@ -45,7 +45,7 @@ def main(args, model, test_loader):
                                 reciprocals[reciprocal_id])
         makedir(data_dir)
 
-        sample_device = dict_to_device(sample, device)
+        sample_device = dict_to_device(sample, device, device_name)
 
         print(f'Testing {data_dir} ...')
         initial_time = time.time()

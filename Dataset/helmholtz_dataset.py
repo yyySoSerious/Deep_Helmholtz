@@ -27,6 +27,8 @@ class Helmholtz_Dataset(Dataset):
 
     def get_data(self, path_to_data, prefix, conc_light=False):
         image, projection_mat, light_pos = prep.get_image_data(path_to_data, prefix)
+        image = (image * np.random.uniform(1, 3)).clip(0, 2)
+        image =  prep.randomNoise(image)
         if conc_light:
             image = (image * np.random.uniform(1, 3)).clip(0, 2)
             image =  prep.randomNoise(image)
@@ -112,17 +114,16 @@ class Helmholtz_Dataset(Dataset):
                 images.append(image_light)
                 projection_mats.append(projection_mat)
 
-        if self.mode == 'train':
-            mask = prep.read_exr_image(path_to_mask)
-            mask[mask != 1.0] = 0.0
+        mask = prep.read_exr_image(path_to_mask)
+        mask[mask != 1.0] = 0.0
 
-            normal = prep.read_exr_image(path_to_normal)
-            norm = np.sqrt((normal * normal).sum(2, keepdims=True))
-            normal = normal / (norm + 1e-12)
+        normal = prep.read_exr_image(path_to_normal)
+        norm = np.sqrt((normal * normal).sum(2, keepdims=True))
+        normal = normal / (norm + 1e-12)
 
 
-            data['mask'] = mask[:, :, 1]
-            data['normal_gt'] = normal.transpose([2, 0, 1])
+        data['mask'] = mask[:, :, 1]
+        data['normal_gt'] = normal.transpose([2, 0, 1])
 
         images = np.stack(images).transpose([0, 3, 1, 2]) #shape: (num_reciprocals + 1, 6, H, W)
         projection_mats = np.stack(projection_mats)

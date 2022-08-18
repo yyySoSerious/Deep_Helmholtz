@@ -10,11 +10,10 @@ from Dataset.helmholtz_dataset import Helmholtz_Dataset
 class Helper:
     def __init__(self, args, helper_args, config, **kwargs):
         self.args = args
+        self.max_norm = config['max_norm']
         self.local_rank = helper_args['local_rank']
         self.is_distributed = helper_args['is_distributed']
-        self.device_name = helper_args['device_name']
-        self.device = torch.device(self.device_name)
-        self.initial_epoch = 0
+        self.initial_epoch = 1
         if self.is_distributed and self.args.sync_bn:
             import apex
             self.apex = apex
@@ -36,12 +35,18 @@ class Helper:
         else:
             self.train_sampler, self.val_sampler = None, None
 
-        self.train_loader = torch.utils.data.DataLoader(train_set, config['batch'], sampler=self.train_sampler,
-                                                        num_workers=2, drop_last=True,
+        batch = 2 if args.mvsalt else config['batch']
+
+        self.device_name = helper_args['device_name']
+        self.device = torch.device(self.device_name)
+        self.use_amp = True if self.device_name == 'cuda' else False
+        self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
+        self.train_loader = torch.utils.data.DataLoader(train_set, batch, sampler=self.train_sampler,
+                                                        num_workers=args.num_gpus*2, drop_last=True,
                                                         shuffle=self.train_sampler is None,
                                                         pin_memory=self.device_name != 'cpu')
-        self.val_loader = torch.utils.data.DataLoader(val_set, config['batch'], sampler=self.val_sampler,
-                                                      num_workers=2, drop_last=True,
+        self.val_loader = torch.utils.data.DataLoader(val_set, batch, sampler=self.val_sampler,
+                                                      num_workers=args.num_gpus*2, drop_last=True,
                                                       shuffle=self.val_sampler is None,
                                                       pin_memory=self.device_name != 'cpu')
 
@@ -70,7 +75,7 @@ class Helper:
             for k in keys:
                 values.append(summary[k])
             values = torch.stack(values, dim=0)
-            dist.reduce(values, op=dist.reduce_op.SUM, dst=0)
+            dist.reduce(values, op=dist.ReduceOp.SUM, dst=0)
             if self.local_rank == 0:
                 values /= float(dist.get_world_size())
             avg_summary = {k: v for k, v in zip(keys, values)}
@@ -138,5 +143,6 @@ class Config:
     def __init__(self):
         self.config = {
             'batch': tune.choice([1, 2, 4, 8]),
-            'lr': tune.loguniform(1e-4, 1e-1), #5e-3, 5e-2)
+            'lr': tune.loguniform(1e-4, 1e-3), #5e-3, 5e-2)
+            'max_norm': tune.uniform(1, 5),
         }

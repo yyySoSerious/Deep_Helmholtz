@@ -1,4 +1,4 @@
-import torch
+import torch, gc
 import torch.nn.functional as F
 
 eps = 1e-12
@@ -78,7 +78,9 @@ def compute_depth(curr_stage_features, curr_stage_projection_mats, depth_samples
             volume_sum += warped_volume
             volume_sq_sum += warped_volume.pow_(2)  # in_place method
         del warped_volume
+    gc.collect()
     volume_variance = volume_sq_sum.div_(num_views).sub_(volume_sum.div_(num_views).pow_(2))
+
     prob_volume_pre = cost_reg(volume_variance).squeeze(1)
     prob_volume = F.softmax(prob_volume_pre, dim=1)
     depth = depth_regression(prob_volume, depth_samples=depth_samples)
@@ -129,6 +131,8 @@ def homo_warping(src_feat, src_proj, ref_proj, depth_samples):
         proj_y_normalized = proj_xy[:, 1, :, :] / ((height - 1) / 2) - 1  # shape: (B, num_depths, H*W)
         proj_xy = torch.stack((proj_x_normalized, proj_y_normalized), dim=3)  # shape: (B, num_depths, H*W, 2)
         grid = proj_xy
+        del proj_x_normalized, proj_y_normalized
+
 
     warped_src_feat = F.grid_sample(src_feat, grid.view(batch, num_depths * height, width, 2), mode='bilinear',
                                     padding_mode='zeros', align_corners=False)
@@ -142,7 +146,21 @@ def depth_regression(prob_volume, depth_samples):
     if depth_samples.dim() <= 2:
         depth_samples = depth_samples.view(*depth_samples.shape, 1, 1)
     depth = torch.sum(prob_volume * depth_samples, 1)
+
     return depth
+
+def refine_depth(init_depth_map, ref_img, depth_values, shape, depth_refiner):
+    min_depth = depth_values[:, 0]
+    max_depth = depth_values[:, 1]
+    min_depth_2d = min_depth.unsqueeze(-1).unsqueeze(-1).repeat(1, shape[0], shape[1])
+    max_depth_2d = max_depth.unsqueeze(-1).unsqueeze(-1).repeat(1, shape[0], shape[1])
+    depth_scale_2d = max_depth_2d - min_depth_2d
+    init_norm_depth_map = (init_depth_map - min_depth_2d).div_(depth_scale_2d)
+    norm_depth_map = depth_refiner(ref_img, init_norm_depth_map)
+    refined_depth_map = norm_depth_map.mul_(depth_scale_2d) + min_depth_2d
+
+    return refined_depth_map
+
 
 def warp(src_feat, src_proj, ref_proj):
     batch, channels = src_feat.shape[0], src_feat.shape[1]

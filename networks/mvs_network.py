@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from . import layers
+from .net_functions import *
 
 class FeatExtractorNet(nn.Module):
     def __init__(self, in_channels, base_channels, num_stages=3):
@@ -117,12 +118,26 @@ class CostRegularizerNet(nn.Module):
 
         return x
 
-import torch.nn as nn
-from .net_functions import *
+class RefineNet(nn.Module):
+    def __init__(self, in_channels, base_channels):
+        super(RefineNet, self).__init__()
 
+        self.conv0 = layers.Conv2dLayer(in_channels, base_channels, 3, 1, padding=1)
+        self.conv1 = layers.Conv2dLayer(base_channels, base_channels, 3, 1, padding=1)
+        self.conv2 = layers.Conv2dLayer(base_channels, base_channels, 3, 1, padding=1)
+        self.residual = nn.Conv2d(base_channels, 1, 3, 1, bias=True, padding=1)
+
+    def forward(self, img, init_depth_map):
+        conv0 = self.conv0(torch.cat((img, init_depth_map.unsqueeze(1)), dim=1))
+        conv1 = self.conv1(conv0)
+        conv2 = self.conv2(conv1)
+        depth_residual = self.residual(conv2)
+        refined_depth_map = init_depth_map + depth_residual[:, 0]
+
+        return refined_depth_map
 
 class MVSNet(nn.Module):
-    def __init__(self, planes_in_stages=(64, 32, 8), conf_lambda=1.5, grad_method='detach',
+    def __init__(self, planes_in_stages=(64, 32, 8), conf_lambda=1.5, grad_method='detach', refine_depth=False,
                  base_channels_per_stage=(8, 8, 8)):
         super(MVSNet, self).__init__()
 
@@ -140,6 +155,9 @@ class MVSNet(nn.Module):
         self.cost_regularizer = nn.ModuleList(
             [CostRegularizerNet(in_channels=self.feature_extractor.out_channels[i],
                                     base_channels=self.base_channels_per_stage[i]) for i in range(self.num_stages)])
+        self.refine_depth = refine_depth
+        if self.refine_depth and self.num_stages == 1:
+            self.depth_refiner = RefineNet(in_channels=4, base_channels=base_channels_per_stage[0]*4)
 
     def forward(self, images, projection_mats, depth_values):
         '''
@@ -197,6 +215,13 @@ class MVSNet(nn.Module):
             expected_variance = curr_stage_outputs['variance']
 
             outputs[f'stage{stage_num + 1}'] = curr_stage_outputs
+
+        if self.refine_depth and self.num_stages == 1:
+            init_depth_map = outputs['stage1']['depth']
+            shape = [init_depth_map.shape[1], init_depth_map.shape[2]]
+            ref_img = F.interpolate(images[:, 0], [shape[0], shape[1]], mode='bilinear')
+            refined_depth_map = refine_depth(init_depth_map, ref_img, depth_values, shape, self.depth_refiner)
+            outputs['stage1']['refined_depth'] = refined_depth_map
 
         return outputs
 

@@ -7,7 +7,7 @@ os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
 
 def makedir(path:str):
     if not os.path.exists(path):
-        os.makedirs(path)
+        os.makedirs(path,exist_ok=True)
 
 
 # test ratio is implied
@@ -66,6 +66,9 @@ def save_camera(save_path, projection_mat):
 def read_exr_image(path_to_image:str):
     return cv2.imread(
         path_to_image, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
+
+def save_exr_image_as_png(filename: str, path_to_exr_image:str):
+    cv2.imwrite(filename, np.uint8(normalize_exr_image(read_exr_image(path_to_exr_image))*255))
 
 
 def normalize_exr_image(image: np.ndarray):
@@ -172,7 +175,18 @@ if __name__ == '__main__':
     #print('extrinsic matrix', extrinsic, 'shape:', extrinsic.shape)
     #print('intrinsic matrix', intrinsic, 'shape:', intrinsic.shape)
 
-    #image = read_exr_image("/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_dataset/TissueBox/a65eb3d3898cdd9a48e2056fc010654d/view_6/normal0001.exr")
+    path = "/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_dataset/Cage/22a6831f59ef0593852c49940c485735/view_3"
+    image = "/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_dataset/Cage/22a6831f59ef0593852c49940c485735/view_3/0001.exr"
+    save_path = '/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/examples/reciprocal_pairs'
+    makedir(save_path)
+    view_save = os.path.join(save_path, f'view.png')
+    save_exr_image_as_png(view_save, image)
+    reciprocals = os.path.join(path, 'reciprocals')
+    for i in range(4):
+        for j in range(2):
+            image = os.path.join(reciprocals, f'{i + 1}_{j + 1}_0001.exr')
+            save_exr_image_as_png(os.path.join(save_path, f'{i + 1}_{j + 1}.png'), image)
+    sdesf
 
     #tensor_img = torch.from_numpy(image.transpose(2, 0, 1)).unsqueeze(0)
     #if torch.isnan(tensor_img).any():
@@ -185,5 +199,21 @@ if __name__ == '__main__':
     #print(this.shape)
     #image = this.numpy()
     #image = image.transpose(1, 2, 0)
-    #imshow_exr("imae", image)
-    #cv2.waitKey()
+    imshow_exr("imae", image)
+    cv2.waitKey()
+    efefw
+    #save
+    root_dir = '/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/examples'
+    obj_list = '/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_dataset/obj_dirs.txt'
+
+    objs = open(obj_list).readlines()
+    objs = list(map(lambda path: path.strip(), objs))[1:]
+    num_objs = len(objs)
+    random.shuffle(objs)
+    for i in range(30):
+        save_path = os.path.join(root_dir, os.path.split(objs[i])[1])
+        makedir(save_path)
+        for j in range(8):
+            view_path = os.path.join('/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/',
+                                     objs[i],f'view_{j+1}', '0001.exr')
+            save_exr_image_as_png(os.path.join(save_path, f'{str(j+1)}.png'), view_path)

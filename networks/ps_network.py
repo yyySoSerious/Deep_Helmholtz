@@ -146,8 +146,10 @@ class PsNet(nn.Module):
         lost_feats = [lost_features[0].view(-1)]
         projection_mats = torch.unbind(projection_mats, 1)
 
+        ref_proj = projection_mats[0]
+        ref_proj_new = ref_proj[:, 0].clone()
+        ref_proj_new[:, :3, :4] = torch.matmul(ref_proj[:, 1, :3, :3], ref_proj[:, 0, :3, :4])
         for i in range(0, len(features) - 1, 2):
-            ref_proj = projection_mats[0]
             rcpcl1_proj, rcpcl2_proj = projection_mats[i + 1], projection_mats[i + 2]
 
             rcpcl2_proj_new = rcpcl2_proj[:, 0].clone()
@@ -162,8 +164,6 @@ class PsNet(nn.Module):
                                                                    rcpcl1_proj_new, rcpcl2_proj_new, lost_shape)
 
             rcpcl1_proj_new[:, :3, :4] = torch.matmul(rcpcl1_proj[:, 1, :3, :3], rcpcl1_proj[:, 0, :3])
-            ref_proj_new = ref_proj[:, 0].clone()
-            ref_proj_new[:, :3, :4] = torch.matmul(ref_proj[:, 1, :3, :3], ref_proj[:, 0, :3, :4])
             pooled_reciprocal_feat = warp(pooled_reciprocal_feat, rcpcl1_proj_new, ref_proj_new)
             pooled_reciprocal_lost_feat = warp(pooled_reciprocal_lost_feat, rcpcl1_proj_new, ref_proj_new)
 
