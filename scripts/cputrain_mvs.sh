@@ -10,7 +10,7 @@ ckpt="/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_
 
 batch=8
 epochs=60
-lr=0.001
+lr=0.0005
 num_workers=$2
 num_gpus=$1
 
@@ -21,4 +21,4 @@ torchrun  --standalone \
           $train_script --root_dir $root_dir --save_dir $save_dir --train_list $train_list \
           --val_list $val_list --net_type $mode --batch $batch --epochs $epochs --lr $lr \
           --lr_idx '20, 30, 40, 50:0.625'  --num_reciprocals 1 --planes_in_stages '64' --sync_bn \
-          --log_freq 50  --num_workers $num_workers --mvsalt --refine_depth --lr_decay 0.5
+          --log_freq 50  --num_workers $num_workers --mvsalt --refine_depth

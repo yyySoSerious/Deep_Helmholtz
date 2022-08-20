@@ -36,7 +36,7 @@ class PSHelper(Helper):
         milestones = list(
             map(lambda x: int(x) * len(self.train_loader), self.args.lr_idx.split(':')[0].split(',')))
         gamma = float(self.args.lr_idx.split(':')[1])
-        self.scheduler = get_step_schedule_with_warmup(optimizer=self.optimizer, milestones=milestones, gamma=gamma)
+        self.scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=self.optimizer, milestones=milestones, gamma=gamma)
 
         if self.is_distributed:
             if self.args.sync_bn:
@@ -47,7 +47,8 @@ class PSHelper(Helper):
                                                                    output_device=self.local_rank)
             self.optimizer = ZeroRedundancyOptimizer(self.model.parameters(), optimizer_class=torch.optim.Adam,
                                                      lr=config['lr'], betas=(self.args.beta_1, self.args.beta_2), weight_decay=self.args.lr_decay)
-            self.scheduler = get_step_schedule_with_warmup(optimizer=self.optimizer, milestones=milestones, gamma=gamma)
+            self.scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=self.optimizer, milestones=milestones,
+                                                              gamma=gamma)
 
         else:
             self.model = nn.DataParallel(self.model, device_ids=range(torch.cuda.device_count()))
@@ -56,6 +57,7 @@ class PSHelper(Helper):
             self.optimizer.load_state_dict(optim_state)
             self.scheduler.load_state_dict(scheduler_state)
             self.scaler.load_state_dict(scaler_state)
+
 
     def initialize(self, loader_data: dict, model, optimizer, scheduler):
         pass

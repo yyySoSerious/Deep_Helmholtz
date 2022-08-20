@@ -25,7 +25,8 @@ class FeatExtractorNet(nn.Module):
             layers.Conv2dLayer(base_channels * 4, base_channels * 4, 3, 1, padding=1)
         )
 
-        self.out1 = nn.Conv2d(base_channels * 4, base_channels * 4, 1, bias=False)
+        self.out1 = nn.Conv2d(base_channels * 4, base_channels * 4, 1, 1,bias=False)
+        #self.out1 = nn.Conv2d(base_channels * 4, base_channels * 4, 1, bias=False)
         self.out_channels = [4 * base_channels]
 
         if num_stages == 2:
@@ -104,7 +105,8 @@ class CostRegularizerNet(nn.Module):
         self.deconv9 = layers.Deconv3dLayer(base_channels * 2, base_channels * 1, stride=2, padding=1,
                                             output_padding=1)
 
-        self.prob = nn.Conv3d(base_channels, 1, 3, stride=1, padding=1, bias=False)
+        self.prob = nn.Conv3d(base_channels, 1, 3, stride=1, padding=1, bias=True)
+        #self.prob = nn.Conv3d(base_channels, 1, 3, stride=1, padding=1, bias=False)
 
     def forward(self, x):
         conv0 = self.conv0(x)
@@ -118,6 +120,7 @@ class CostRegularizerNet(nn.Module):
 
         return x
 
+
 class RefineNet(nn.Module):
     def __init__(self, in_channels, base_channels):
         super(RefineNet, self).__init__()
@@ -125,14 +128,18 @@ class RefineNet(nn.Module):
         self.conv0 = layers.Conv2dLayer(in_channels, base_channels, 3, 1, padding=1)
         self.conv1 = layers.Conv2dLayer(base_channels, base_channels, 3, 1, padding=1)
         self.conv2 = layers.Conv2dLayer(base_channels, base_channels, 3, 1, padding=1)
-        self.residual = nn.Conv2d(base_channels, 1, 3, 1, bias=True, padding=1)
+        self.residual = nn.Conv2d(base_channels, 1, 3, 1, bias=False, padding=1)
 
     def forward(self, img, init_depth_map):
-        conv0 = self.conv0(torch.cat((img, init_depth_map.unsqueeze(1)), dim=1))
+        init_depth = init_depth_map.unsqueeze(1)
+        conv0 = self.conv0(torch.cat((img, init_depth), dim=1))
         conv1 = self.conv1(conv0)
         conv2 = self.conv2(conv1)
         depth_residual = self.residual(conv2)
-        refined_depth_map = init_depth_map + depth_residual[:, 0]
+        #refined_depth_map = depth_residual + init_depth
+        #refined_depth_map = refined_depth_map.squeeze(1)
+        refined_depth_map = torch.stack((init_depth.view(-1), depth_residual.view(-1)), 1).mean(1)
+        refined_depth_map = refined_depth_map.view(*init_depth.shape).squeeze(1)
 
         return refined_depth_map
 
@@ -149,7 +156,7 @@ class MVSNet(nn.Module):
         max_stages = 3
         self.scale_factors = [2**(max_stages-1) // 2**i for i in range(self.num_stages)]# {'stage1': 4.0, 'stage2': 2.0, 'stage3': 1.0}
 
-        self.feature_extractor = FeatExtractorNet(in_channels=3, base_channels=base_channels_per_stage[0],
+        self.feature_extractor = FeatExtractorNet(in_channels=6, base_channels=base_channels_per_stage[0],
                                                           num_stages=self.num_stages)
 
         self.cost_regularizer = nn.ModuleList(
@@ -157,7 +164,7 @@ class MVSNet(nn.Module):
                                     base_channels=self.base_channels_per_stage[i]) for i in range(self.num_stages)])
         self.refine_depth = refine_depth
         if self.refine_depth and self.num_stages == 1:
-            self.depth_refiner = RefineNet(in_channels=4, base_channels=base_channels_per_stage[0]*4)
+            self.depth_refiner = RefineNet(in_channels=7, base_channels=base_channels_per_stage[0]*4)
 
     def forward(self, images, projection_mats, depth_values):
         '''
@@ -215,7 +222,6 @@ class MVSNet(nn.Module):
             expected_variance = curr_stage_outputs['variance']
 
             outputs[f'stage{stage_num + 1}'] = curr_stage_outputs
-
         if self.refine_depth and self.num_stages == 1:
             init_depth_map = outputs['stage1']['depth']
             shape = [init_depth_map.shape[1], init_depth_map.shape[2]]
