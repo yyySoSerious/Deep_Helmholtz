@@ -17,7 +17,7 @@ class MVSHelper(Helper):
         self.num_stages = len(planes_in_stages)
         self.refine_depth = args.refine_depth
         super(MVSHelper, self).__init__(args, helper_args, config, num_stages=self.num_stages)
-        self.effective_batch = config['batch'] if args.mvsalt else 2
+        self.effective_batch = config['batch'] if args.mvsalt else 4
         self.loss_weights = list(map(float, self.args.loss_weights.split(',')))
         optim_state, scheduler_state, scaler_state = None, None, None
 
@@ -47,8 +47,7 @@ class MVSHelper(Helper):
         milestones = list(
             map(lambda x: int(x) * len(self.train_loader), self.args.lr_idx.split(':')[0].split(',')))
         gamma = float(self.args.lr_idx.split(':')[1])
-        self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, milestones, gamma=gamma,
-                                                              last_epoch=self.initial_epoch-2)#get_step_schedule_with_warmup(optimizer=self.optimizer, milestones=milestones, gamma=gamma)
+        self.scheduler = get_step_schedule_with_warmup(optimizer=self.optimizer, milestones=milestones, gamma=gamma)
 
         if self.args.ckpt_to_continue and current_index > 0:
             self.scheduler.load_state_dict(scheduler_state)
@@ -66,8 +65,7 @@ class MVSHelper(Helper):
                                                      weight_decay=self.args.lr_decay)
             if self.args.ckpt_to_continue and current_index > 0:
                 self.optimizer.load_state_dict(optim_state)
-            self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, milestones, gamma=gamma,
-                                                              last_epoch=self.initial_epoch-2)#get_step_schedule_with_warmup(optimizer=self.optimizer, milestones=milestones, gamma=gamma)
+            self.scheduler = get_step_schedule_with_warmup(optimizer=self.optimizer, milestones=milestones, gamma=gamma)
 
             if self.args.ckpt_to_continue and current_index > 0:
                 self.scheduler.load_state_dict(scheduler_state)
@@ -93,14 +91,8 @@ class MVSHelper(Helper):
             with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=self.use_amp):
                 outputs = self.model(sample['imgs'], sample['projection_mats'], sample['depth_values'])
                 loss = self.loss(outputs, sample['depth_gts'], sample['masks'])
-                try:
-                    if torch.isnan(loss).any():
-                        raise RuntimeError(f"Can you please stop throwing nans? Thank you.")
-                except RuntimeError as error:
-                    print('----------------------------------------------------------------------', file=sys.stderr)
-                    print(error, file=sys.stderr)
-
                 total_loss += float(loss)
+
             if self.is_distributed:
                 if (batch_idx + 1) % self.effective_batch == 0 or (batch_idx + 1) == self.num_batches_train:
                     self.scaler.scale(loss).backward()

@@ -29,8 +29,6 @@ class Helmholtz_Dataset(Dataset):
         image, projection_mat, light_pos = prep.get_image_data(path_to_data, prefix)
         #image = (image * np.random.uniform(1, 3)).clip(0, 2)
         #image =  prep.randomNoise(image)
-        light_pos = np.broadcast_to(light_pos, image.shape)
-        image = np.concatenate((image, light_pos), 2) #shape: (H, W, 6)
         if conc_light:
             image = (image * np.random.uniform(1, 3)).clip(0, 2)
             image =  prep.randomNoise(image)
@@ -38,6 +36,10 @@ class Helmholtz_Dataset(Dataset):
             image_light = np.concatenate((image, light_pos), 2) #shape: (H, W, 6)
 
             return image_light, projection_mat
+        else:
+
+            light_pos = np.broadcast_to(light_pos, image.shape)
+            image = np.concatenate((image, light_pos), 2)  # shape: (H, W, 6)
 
         return image, projection_mat
 

@@ -26,7 +26,7 @@ class TrainFlags:
         self.parser.add_argument('--batch', type=int, default=1)
         self.parser.add_argument('--num_workers', type=int, default=1)
         self.parser.add_argument('--num_gpus', type=int, default=1)
-        self.parser.add_argument('--max_norm', type=float, default=1.5, help='gradient_clipping')
+        self.parser.add_argument('--max_norm', type=float, default=2, help='gradient_clipping')
 
         # mvs args
         self.parser.add_argument('--num_reciprocals', type=int, help='num of candidate views', default=4)

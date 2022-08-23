@@ -1,5 +1,6 @@
 import torch, gc
 import torch.nn.functional as F
+from utils.grid_sample_gradfix import grid_sample
 
 eps = 1e-12
 
@@ -134,8 +135,8 @@ def homo_warping(src_feat, src_proj, ref_proj, depth_samples):
         del proj_x_normalized, proj_y_normalized
 
 
-    warped_src_feat = F.grid_sample(src_feat, grid.view(batch, num_depths * height, width, 2), mode='bilinear',
-                                    padding_mode='zeros', align_corners=False)
+    warped_src_feat = grid_sample(src_feat, grid.view(batch, num_depths * height, width, 2)) #F.grid_sample(src_feat, grid.view(batch, num_depths * height, width, 2), mode='bilinear',
+                                    #padding_mode='zeros', align_corners=False)
 
     warped_src_feat = warped_src_feat.view(batch, channels, num_depths, height, width)
 
@@ -185,7 +186,7 @@ def warp(src_feat, src_proj, ref_proj):
         proj_xy = torch.stack((proj_x_normalized, proj_y_normalized), dim=2)  # shape: (B, H*W, 2)
         grid = proj_xy
 
-    warped_src_feat = F.grid_sample(src_feat, grid.view(batch, height, width, 2), mode='bilinear',
-                                    padding_mode='zeros', align_corners=False)
+    warped_src_feat = grid_sample(src_feat, grid.view(batch, height, width, 2)) #F.grid_sample(src_feat, grid.view(batch, height, width, 2), mode='bilinear',
+                                    #padding_mode='zeros', align_corners=False)
 
     return warped_src_feat.view(batch, channels, height, width)

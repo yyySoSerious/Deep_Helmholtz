@@ -141,7 +141,6 @@ def calc_normal_acc(gt_n, pred_n, mask=None):
     error_map   = torch.acos(dot_product) # [-pi, pi]
     angular_map = error_map * 180.0 / np.pi
     angular_map = angular_map * mask.float()
-
     valid = mask.float().sum()
     ang_valid   = angular_map[mask]
     n_err_mean  = ang_valid.sum() / (valid + 1e-12)

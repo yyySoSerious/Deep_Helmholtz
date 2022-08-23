@@ -36,7 +36,7 @@ class PSHelper(Helper):
         milestones = list(
             map(lambda x: int(x) * len(self.train_loader), self.args.lr_idx.split(':')[0].split(',')))
         gamma = float(self.args.lr_idx.split(':')[1])
-        self.scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=self.optimizer, milestones=milestones, gamma=gamma)
+        self.scheduler = get_step_schedule_with_warmup(optimizer=self.optimizer, milestones=milestones, gamma=gamma)
 
         if self.is_distributed:
             if self.args.sync_bn:
@@ -47,8 +47,7 @@ class PSHelper(Helper):
                                                                    output_device=self.local_rank)
             self.optimizer = ZeroRedundancyOptimizer(self.model.parameters(), optimizer_class=torch.optim.Adam,
                                                      lr=config['lr'], betas=(self.args.beta_1, self.args.beta_2), weight_decay=self.args.lr_decay)
-            self.scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=self.optimizer, milestones=milestones,
-                                                              gamma=gamma)
+            self.scheduler = get_step_schedule_with_warmup(optimizer=self.optimizer, milestones=milestones, gamma=gamma)
 
         else:
             self.model = nn.DataParallel(self.model, device_ids=range(torch.cuda.device_count()))
@@ -120,10 +119,8 @@ class PSHelper(Helper):
             outputs = self.model(sample['imgs'], sample['projection_mats'])
             # print_dict(outputs)
             loss = self.loss(outputs, sample['normal_gt'], sample['mask'])
-            if torch.isnan(loss).any():
-                total_loss += sys.maxsize
-            else:
-                total_loss += float(loss)
+
+            total_loss += float(loss)
 
             image_summary, scalar_summary = self.get_summary(sample, outputs)
             avg_scalar_summary.update(scalar_summary)

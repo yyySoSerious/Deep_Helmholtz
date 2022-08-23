@@ -11,7 +11,7 @@ def makedir(path:str):
 
 
 # test ratio is implied
-def split_dataset(path_to_dataset_list:str, output_dir:str, train_ratio=0.70, val_ratio=0.20):
+def split_dataset(path_to_dataset_list:str, output_dir:str, train_ratio=0.80, val_ratio=0.10):
     makedir(output_dir)
     train_path = os.path.join(output_dir, 'train.txt')
     val_path = os.path.join(output_dir, 'val.txt')
@@ -169,24 +169,24 @@ if __name__ == '__main__':
     #path_to_objs_list = '/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_dataset/obj_dirs.txt'
     #save_path = '/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/test'
     #split_dataset(path_to_objs_list, save_path, train_ratio=0.01, val_ratio=0.01)
-    #split_dataset('../../Helmholtz_dataset/obj_dirs.txt', '.')
+    split_dataset('../../Helmholtz_dataset/obj_dirs.txt', '.')
 
     #extrinsic, intrinsic = parse_cameras('../../Helmholtz_dataset/03325088/1a5586fc147de3214b35a7d7cea7130/view_2/right_reciprocal')
     #print('extrinsic matrix', extrinsic, 'shape:', extrinsic.shape)
     #print('intrinsic matrix', intrinsic, 'shape:', intrinsic.shape)
 
-    path = "/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_dataset/Cage/22a6831f59ef0593852c49940c485735/view_3"
-    image = "/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_dataset/Cage/22a6831f59ef0593852c49940c485735/view_3/0001.exr"
-    save_path = '/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/examples/reciprocal_pairs'
-    makedir(save_path)
-    view_save = os.path.join(save_path, f'view.png')
-    save_exr_image_as_png(view_save, image)
-    reciprocals = os.path.join(path, 'reciprocals')
-    for i in range(4):
-        for j in range(2):
-            image = os.path.join(reciprocals, f'{i + 1}_{j + 1}_0001.exr')
-            save_exr_image_as_png(os.path.join(save_path, f'{i + 1}_{j + 1}.png'), image)
-    sdesf
+    #path = "/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_dataset/Cage/22a6831f59ef0593852c49940c485735/view_3"
+    #image = "/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/Helmholtz_dataset/Cage/22a6831f59ef0593852c49940c485735/view_3/0001.exr"
+    #save_path = '/Users/culsu/Documents/UNI_stuff/Surrey/Courses/MSC_Project/src/examples/reciprocal_pairs'
+    #makedir(save_path)
+    #view_save = os.path.join(save_path, f'view.png')
+    #save_exr_image_as_png(view_save, image)
+    #reciprocals = os.path.join(path, 'reciprocals')
+    #for i in range(4):
+    #    for j in range(2):
+    #        image = os.path.join(reciprocals, f'{i + 1}_{j + 1}_0001.exr')
+   #         save_exr_image_as_png(os.path.join(save_path, f'{i + 1}_{j + 1}.png'), image)
+   # sdesf
 
     #tensor_img = torch.from_numpy(image.transpose(2, 0, 1)).unsqueeze(0)
     #if torch.isnan(tensor_img).any():
