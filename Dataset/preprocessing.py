@@ -114,11 +114,13 @@ def parse_views(root_dir:str, path_to_obj_dir_list:str, num_views=8):
     return views_data
 
 
-def load_depth_maps(path_to_depth_map:str, scale_factors, max_stages):
+def load_depth_maps(path_to_depth_map:str, scale_factors, max_stages, **kwargs):
     num_stages = len(scale_factors)
     original_depth_map = read_exr_image(path_to_depth_map)[:,:, 0]
     h, w = original_depth_map.shape
     depth_maps = {}
+    if kwargs['refine_type'] == 'type2':
+        depth_maps['refinedGT'] =  cv2.resize(original_depth_map, (w//2, h//2), interpolation=cv2.INTER_NEAREST)
     #depth_maps[f'stage{num_stages}'] = original_depth_map
     for i in range(num_stages):
         if i == max_stages - 1:
@@ -147,13 +149,19 @@ def get_image_data(data_dir: str, prefix: str):
 
     return image, projection_mat, light_pos
 
-def generate_masks(depth_maps:dict, min_depth, max_depth):
+def generate_masks(depth_maps:dict, min_depth, max_depth, **kwargs):
     masks = {}
     for stage, depth_map in depth_maps.items():
         mask = np.ones(depth_map.shape, np.uint8)
         mask[depth_map > max_depth] = 0
         mask[depth_map < min_depth] = 0
         masks[stage] = mask
+    if kwargs['refine_type'] == 'type2':
+        depth_map = depth_maps['refinedGT']
+        mask = np.ones(depth_map.shape, np.uint8)
+        mask[depth_map > max_depth] = 0
+        mask[depth_map < min_depth] = 0
+        masks['refinedGT'] = mask
     return masks
 
 def randomNoise(image, factor=0.05):

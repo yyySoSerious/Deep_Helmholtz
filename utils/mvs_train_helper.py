@@ -15,14 +15,14 @@ class MVSHelper(Helper):
         planes_in_stages = planes[:config['num_stages']]
         conf_lambda = config['conf_lambda']
         self.num_stages = len(planes_in_stages)
-        self.refine_depth = args.refine_depth
+        self.refine_type = args.refine_type
         super(MVSHelper, self).__init__(args, helper_args, config, num_stages=self.num_stages)
         self.effective_batch = config['batch'] if args.mvsalt else 4
         self.loss_weights = list(map(float, self.args.loss_weights.split(',')))
         optim_state, scheduler_state, scaler_state = None, None, None
 
         self.model = MVSNet(planes_in_stages=planes_in_stages,
-                 conf_lambda=conf_lambda, refine_depth=self.refine_depth, conc_light=not args.no_light)
+                 conf_lambda=conf_lambda, refine_type=self.refine_type, conc_light=not args.no_light)
 
         #print(self.model)
         #fsdfd
@@ -42,7 +42,7 @@ class MVSHelper(Helper):
                                           lr=config['lr'], betas=(self.args.beta_1, self.args.beta_2),
                                           weight_decay=self.args.lr_decay)
         milestones = list(
-            map(lambda x: int(x) * len(self.train_loader), self.args.lr_idx.split(':')[0].split(',')))
+            map(lambda x: int(x) * (len(self.train_loader)/4), self.args.lr_idx.split(':')[0].split(',')))
         gamma = float(self.args.lr_idx.split(':')[1])
         self.scheduler = get_step_schedule_with_warmup(optimizer=self.optimizer, milestones=milestones, gamma=gamma)
 
@@ -158,18 +158,25 @@ class MVSHelper(Helper):
             depth_loss = F.smooth_l1_loss(inferred_depth[mask], depth_gt[mask], reduction='mean')
             total_loss += depth_loss * self.loss_weights[stage_idx]
 
-            if self.num_stages == 1 and self.refine_depth:
-                refined_depth = outputs['stage1']['refined_depth']
-                refined_depth_loss = F.smooth_l1_loss(refined_depth[mask], depth_gt[mask], reduction='mean')
-                total_loss = (depth_loss + refined_depth_loss)
+            if self.num_stages == 1:
+                if self.refine_type == 'type1':
+                    refined_depth = outputs['stage1']['refined_depth']
+                    refined_depth_loss = F.smooth_l1_loss(refined_depth[mask], depth_gt[mask], reduction='mean')
+                    total_loss = 0.5*depth_loss + 0.5*refined_depth_loss
+                elif self.refine_type == 'type2':
+                    refined_depth_gt = depth_gts['refinedGT']
+                    mask = masks['refinedGT'].bool()
+                    refined_depth = outputs['stage1']['refined_depth']
+                    refined_depth_loss = F.smooth_l1_loss(refined_depth[mask], refined_depth_gt[mask], reduction='mean')
+                    total_loss = 0.5 *depth_loss + 0.5*refined_depth_loss
 
         return total_loss
 
     def get_summary(self, inputs, outputs):
-        inferred_depth = outputs[f'stage{self.num_stages}']['refined_depth'] if self.refine_depth else\
+        inferred_depth = outputs[f'stage{self.num_stages}']['refined_depth'] if self.refine_type else\
             outputs[f'stage{self.num_stages}']['depth']
-        depth_gt = inputs['depth_gts'][f'stage{self.num_stages}']
-        mask = inputs['masks'][f'stage{self.num_stages}'].bool()
+        depth_gt = inputs['depth_gts']['refinedGT'] if self.refine_type == 'type2' else inputs['depth_gts'][f'stage{self.num_stages}']
+        mask = inputs['masks']['refinedGT'].bool() if self.refine_type == 'type2' else inputs['masks'][f'stage{self.num_stages}'].bool()
 
         err_map = torch.abs(depth_gt - inferred_depth) * mask.float()
         ref_images = inputs['imgs'][:, 0, :3]

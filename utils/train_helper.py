@@ -20,7 +20,7 @@ class Helper:
 
         train_set = Helmholtz_Dataset(root_dir=self.args.root_dir, path_to_obj_dir_list=self.args.train_list,
                                       num_reciprocals=self.args.num_reciprocals, net=self.args.net_type,
-                                      conc_light=not self.args.no_light, **kwargs)
+                                      conc_light=not self.args.no_light, refine_type=self.args.refine_type, **kwargs)
         val_set = Helmholtz_Dataset(root_dir=self.args.root_dir, path_to_obj_dir_list=self.args.val_list,
                                     num_reciprocals=self.args.num_reciprocals, net=self.args.net_type,
                                     conc_light=not self.args.no_light, **kwargs)

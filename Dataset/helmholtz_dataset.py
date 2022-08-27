@@ -8,7 +8,8 @@ import Dataset.preprocessing as prep
 
 class Helmholtz_Dataset(Dataset):
 
-    def __init__(self, root_dir, path_to_obj_dir_list, num_reciprocals=4, num_views=8, mode='train', net='mvs', **kwargs):
+    def __init__(self, root_dir, path_to_obj_dir_list, num_reciprocals=4, num_views=8, mode='train', net='mvs',
+                 conc_light=True, refine_type=None, **kwargs):
         super(Helmholtz_Dataset, self).__init__()
 
         self.root_dir = root_dir
@@ -16,6 +17,8 @@ class Helmholtz_Dataset(Dataset):
         self.num_reciprocals = num_reciprocals
         self.mode = mode
         self.net = net
+        self.conc_light = conc_light
+        self.refine_type = refine_type
         if self.net == 'mvs':
             self.max_stages = 3
             num_stages = kwargs['num_stages']
@@ -30,16 +33,12 @@ class Helmholtz_Dataset(Dataset):
         #image = (image * np.random.uniform(1, 3)).clip(0, 2)
         #image =  prep.randomNoise(image)
         if conc_light:
-            image = (image * np.random.uniform(1, 3)).clip(0, 2)
-            image =  prep.randomNoise(image)
+            #image = (image * np.random.uniform(1, 3)).clip(0, 2)
+            #image =  prep.randomNoise(image)
             light_pos = np.broadcast_to(light_pos, image.shape)
             image_light = np.concatenate((image, light_pos), 2) #shape: (H, W, 6)
 
             return image_light, projection_mat
-        else:
-
-            light_pos = np.broadcast_to(light_pos, image.shape)
-            image = np.concatenate((image, light_pos), 2)  # shape: (H, W, 6)
 
         return image, projection_mat
 
@@ -52,7 +51,7 @@ class Helmholtz_Dataset(Dataset):
         path_to_depth_range = os.path.join(data_dir, 'depth_range.txt')
         path_to_depth_map = os.path.join(data_dir, 'depth0001.exr')
 
-        image_light, projection_mat = self.get_data(data_dir, "")
+        image_light, projection_mat = self.get_data(data_dir, "", conc_light=self.conc_light)
         min_depth, max_depth = np.float32(open(path_to_depth_range).readlines()[0].split())
         images.append(image_light)
         original_projection_mats.append(projection_mat)
@@ -60,7 +59,7 @@ class Helmholtz_Dataset(Dataset):
         data_dir = os.path.join(data_dir, 'reciprocals')
         for i in range(self.num_reciprocals):
             for j in range(2):
-                image_light, projection_mat = self.get_data(data_dir, f'{i + 1}_{j + 1}_')
+                image_light, projection_mat = self.get_data(data_dir, f'{i + 1}_{j + 1}_', conc_light=self.conc_light)
 
                 images.append(image_light)
                 original_projection_mats.append(projection_mat)
@@ -90,8 +89,9 @@ class Helmholtz_Dataset(Dataset):
         data['depth_values'] = np.array([min_depth, max_depth], np.float32)
 
         if self.mode == 'train':
-            depth_maps = prep.load_depth_maps(path_to_depth_map, self.scale_factors, self.max_stages)
-            masks = prep.generate_masks(depth_maps, min_depth, max_depth)
+            depth_maps = prep.load_depth_maps(path_to_depth_map, self.scale_factors, self.max_stages,
+                                              refine_type=self.refine_type)
+            masks = prep.generate_masks(depth_maps, min_depth, max_depth, refine_type=self.refine_type)
 
             data['depth_gts'] = depth_maps
             data['masks'] = masks

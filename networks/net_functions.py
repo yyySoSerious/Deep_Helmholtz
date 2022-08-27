@@ -35,7 +35,7 @@ def uncertainty_aware_samples(curr_depth, expected_variance, num_depth, dtype, d
 
 # noinspection PyTypeChecker
 def compute_depth(curr_stage_features, curr_stage_projection_mats, depth_samples, cost_reg, conf_lambda,
-                  is_training=False):
+                  depth_refiner=None, is_training=False):
     '''
 
     :param curr_stage_features:
@@ -79,6 +79,13 @@ def compute_depth(curr_stage_features, curr_stage_projection_mats, depth_samples
     gc.collect()
     volume_variance = volume_sq_sum.div_(num_views).sub_(volume_sum.div_(num_views).pow_(2))
     prob_volume_pre = cost_reg(volume_variance).squeeze(1)
+    outputs ={}
+    if depth_refiner:
+        prob_volume = F.softmax(prob_volume_pre, dim=1)
+        outputs['depth'] = depth_regression(prob_volume, depth_samples=depth_samples)
+        prob_volume_pre = F.interpolate(prob_volume_pre, scale_factor=2, mode='bilinear')
+        depth_samples = F.interpolate(depth_samples, scale_factor=2, mode='bilinear')
+        prob_volume_pre = depth_refiner[0](prob_volume_pre, depth_refiner[1])
     prob_volume = F.softmax(prob_volume_pre, dim=1)
     depth = depth_regression(prob_volume, depth_samples=depth_samples)
     with torch.no_grad():
@@ -91,8 +98,13 @@ def compute_depth(curr_stage_features, curr_stage_projection_mats, depth_samples
 
     variance_samples = (depth_samples - depth.unsqueeze(1)) ** 2
     expected_variance = conf_lambda * torch.sum(variance_samples * prob_volume, dim=1, keepdim=False) ** 0.5
-
-    return {'depth': depth, 'confidence': prob_conf, 'variance': expected_variance}
+    outputs['confidence'] = prob_conf
+    outputs['variance'] = expected_variance
+    if depth_refiner:
+        outputs['refined_depth'] = depth
+    else:
+        outputs['depth'] = depth
+    return outputs
 
 
 def homo_warping(src_feat, src_proj, ref_proj, depth_samples):
