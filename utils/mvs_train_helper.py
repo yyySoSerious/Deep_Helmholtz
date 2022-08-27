@@ -22,7 +22,7 @@ class MVSHelper(Helper):
         optim_state, scheduler_state, scaler_state = None, None, None
 
         self.model = MVSNet(planes_in_stages=planes_in_stages,
-                 conf_lambda=conf_lambda, refine_depth=self.refine_depth)
+                 conf_lambda=conf_lambda, refine_depth=self.refine_depth, conc_light=not args.no_light)
 
         #print(self.model)
         #fsdfd
@@ -32,9 +32,8 @@ class MVSHelper(Helper):
             if current_index > 0:
                 model_ckpt = f'model_{current_index:06d}.ckpt'
                 print(f'Loading model {model_ckpt} to continue training...')
-                self.initial_epoch, optim_state, scheduler_state, scaler_state =\
+                self.initial_epoch, optim_state, scheduler_state, scaler_state = \
                     load_checkpoint(os.path.join(args.save_dir, 'checkpoints', model_ckpt), self.model)
-                self.scaler.load_state_dict(scaler_state)
                 print('Model loaded successfully')
 
         self.model = self.model.to(self.device)
@@ -42,15 +41,11 @@ class MVSHelper(Helper):
         self.optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()),
                                           lr=config['lr'], betas=(self.args.beta_1, self.args.beta_2),
                                           weight_decay=self.args.lr_decay)
-        if self.args.ckpt_to_continue and current_index > 0:
-            self.optimizer.load_state_dict(optim_state)
         milestones = list(
             map(lambda x: int(x) * len(self.train_loader), self.args.lr_idx.split(':')[0].split(',')))
         gamma = float(self.args.lr_idx.split(':')[1])
         self.scheduler = get_step_schedule_with_warmup(optimizer=self.optimizer, milestones=milestones, gamma=gamma)
 
-        if self.args.ckpt_to_continue and current_index > 0:
-            self.scheduler.load_state_dict(scheduler_state)
         if self.is_distributed:
             if self.args.sync_bn:
                 self.model = self.apex.parallel.convert_syncbn_model(self.model)
@@ -60,18 +55,17 @@ class MVSHelper(Helper):
             self.model = torch.nn.parallel.DistributedDataParallel(self.model, device_ids=[self.local_rank],
                                                                    output_device=self.local_rank)
             self.optimizer = ZeroRedundancyOptimizer(self.model.parameters(), optimizer_class=torch.optim.Adam,
-                                                     lr=config['lr'],
-                                                     betas=(self.args.beta_1, self.args.beta_2),
+                                                     lr=config['lr'], betas=(self.args.beta_1, self.args.beta_2),
                                                      weight_decay=self.args.lr_decay)
-            if self.args.ckpt_to_continue and current_index > 0:
-                self.optimizer.load_state_dict(optim_state)
             self.scheduler = get_step_schedule_with_warmup(optimizer=self.optimizer, milestones=milestones, gamma=gamma)
 
-            if self.args.ckpt_to_continue and current_index > 0:
-                self.scheduler.load_state_dict(scheduler_state)
         else:
             self.model = nn.DataParallel(self.model, device_ids=range(torch.cuda.device_count()))
 
+        if self.args.ckpt_to_continue and current_index > 0:
+            self.optimizer.load_state_dict(optim_state)
+            self.scheduler.load_state_dict(scheduler_state)
+            self.scaler.load_state_dict(scaler_state)
 
 
     def initialize(self, loader_data: dict, model, optimizer, scheduler):
@@ -80,7 +74,6 @@ class MVSHelper(Helper):
     def train(self, logger, log_index, epoch):
         self.model.train()
         total_loss = 0.0
-        self.optimizer.zero_grad(set_to_none=True)
         for batch_idx, sample in enumerate(self.train_loader):
             log_index += batch_idx
             initialTime = time.time()
@@ -168,7 +161,7 @@ class MVSHelper(Helper):
             if self.num_stages == 1 and self.refine_depth:
                 refined_depth = outputs['stage1']['refined_depth']
                 refined_depth_loss = F.smooth_l1_loss(refined_depth[mask], depth_gt[mask], reduction='mean')
-                total_loss = (depth_loss + refined_depth_loss)/2
+                total_loss = (depth_loss + refined_depth_loss)
 
         return total_loss
 

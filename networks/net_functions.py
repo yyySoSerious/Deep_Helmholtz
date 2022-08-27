@@ -4,7 +4,6 @@ from utils.grid_sample_gradfix import grid_sample
 
 eps = 1e-12
 
-
 def uncertainty_aware_samples(curr_depth, expected_variance, num_depth, dtype, device, shape):
     # first stage
     if curr_depth.dim() == 2:
@@ -51,7 +50,6 @@ def compute_depth(curr_stage_features, curr_stage_projection_mats, depth_samples
     curr_stage_projection_mats = torch.unbind(curr_stage_projection_mats, 1)
     num_views = len(curr_stage_features)
     num_depths = depth_samples.shape[1]
-
     assert len(
         curr_stage_projection_mats) == num_views, \
         'Number of images and number of projection matrices ds are not the same'
@@ -71,7 +69,6 @@ def compute_depth(curr_stage_features, curr_stage_projection_mats, depth_samples
         ref_proj_new = ref_projection_mat[:, 0].clone()
         ref_proj_new[:, :3, :4] = torch.matmul(ref_projection_mat[:, 1, :3, :3], ref_projection_mat[:, 0, :3, :4])
         warped_volume = homo_warping(src_feat, src_proj_new, ref_proj_new, depth_samples)
-
         if is_training:
             volume_sum = volume_sum + warped_volume
             volume_sq_sum = volume_sq_sum + warped_volume ** 2
@@ -81,11 +78,9 @@ def compute_depth(curr_stage_features, curr_stage_projection_mats, depth_samples
         del warped_volume
     gc.collect()
     volume_variance = volume_sq_sum.div_(num_views).sub_(volume_sum.div_(num_views).pow_(2))
-
     prob_volume_pre = cost_reg(volume_variance).squeeze(1)
     prob_volume = F.softmax(prob_volume_pre, dim=1)
     depth = depth_regression(prob_volume, depth_samples=depth_samples)
-
     with torch.no_grad():
         prob_volume_sum4 = 4 * F.avg_pool3d(F.pad(prob_volume.unsqueeze(1), pad=(0, 0, 0, 0, 1, 2)), (4, 1, 1),
                                             stride=1, padding=0).squeeze(1)
@@ -134,10 +129,8 @@ def homo_warping(src_feat, src_proj, ref_proj, depth_samples):
         grid = proj_xy
         del proj_x_normalized, proj_y_normalized
 
-
-    warped_src_feat = grid_sample(src_feat, grid.view(batch, num_depths * height, width, 2)) #F.grid_sample(src_feat, grid.view(batch, num_depths * height, width, 2), mode='bilinear',
-                                    #padding_mode='zeros', align_corners=False)
-
+    warped_src_feat = F.grid_sample(src_feat, grid.view(batch, num_depths * height, width, 2), mode='bilinear',
+                                    padding_mode='zeros', align_corners=False)
     warped_src_feat = warped_src_feat.view(batch, channels, num_depths, height, width)
 
     return warped_src_feat
@@ -186,7 +179,7 @@ def warp(src_feat, src_proj, ref_proj):
         proj_xy = torch.stack((proj_x_normalized, proj_y_normalized), dim=2)  # shape: (B, H*W, 2)
         grid = proj_xy
 
-    warped_src_feat = grid_sample(src_feat, grid.view(batch, height, width, 2)) #F.grid_sample(src_feat, grid.view(batch, height, width, 2), mode='bilinear',
-                                    #padding_mode='zeros', align_corners=False)
+    warped_src_feat = F.grid_sample(src_feat, grid.view(batch, height, width, 2), mode='bilinear',
+                                    padding_mode='zeros', align_corners=False)
 
     return warped_src_feat.view(batch, channels, height, width)

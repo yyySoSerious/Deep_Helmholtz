@@ -34,6 +34,7 @@ class TrainFlags:
         self.parser.add_argument('--planes_in_stages', type=str, help='number of samples for each stage.', default='64,32,8')
         self.parser.add_argument('--mvsalt', default=False, action='store_true') #todo: make this non-optional
         self.parser.add_argument('--refine_depth', default=False, action='store_true')
+        self.parser.add_argument('--no_light', default=False, action='store_true')
 
         # ps args
         self.parser.add_argument('--use_bn', default=True, action='store_true')

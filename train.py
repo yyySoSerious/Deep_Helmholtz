@@ -140,10 +140,11 @@ def train(args, logger, checkpoint_dir):
         if is_distributed:
             helper.optimizer.consolidate_state_dict()
         if local_rank == 0 and (epoch + 1) % args.save_freq == 0:
-            print('saving checkpoint...')
-            save_checkpoint(checkpoint_dir, epoch)
-            with open(args.ckpt_to_continue, 'w') as ckpt:
-                ckpt.write(str(epoch + 1))
+            if args.ckpt_to_continue:
+                print('saving checkpoint...')
+                save_checkpoint(checkpoint_dir, epoch)
+                with open(args.ckpt_to_continue, 'w') as ckpt:
+                    ckpt.write(str(epoch + 1))
 
         # validation
         print('Validating...')

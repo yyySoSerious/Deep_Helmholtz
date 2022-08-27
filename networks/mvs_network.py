@@ -143,9 +143,10 @@ class RefineNet(nn.Module):
 
         return refined_depth_map
 
+
 class MVSNet(nn.Module):
     def __init__(self, planes_in_stages=(64, 32, 8), conf_lambda=1.5, grad_method='detach', refine_depth=False,
-                 base_channels_per_stage=(8, 8, 8)):
+                 conc_light=False, base_channels_per_stage=(8, 8, 8)):
         super(MVSNet, self).__init__()
 
         self.planes_in_stages = planes_in_stages
@@ -156,7 +157,8 @@ class MVSNet(nn.Module):
         max_stages = 3
         self.scale_factors = [2**(max_stages-1) // 2**i for i in range(self.num_stages)]# {'stage1': 4.0, 'stage2': 2.0, 'stage3': 1.0}
 
-        self.feature_extractor = FeatExtractorNet(in_channels=6, base_channels=base_channels_per_stage[0],
+        in_channels = 6 if conc_light else 3
+        self.feature_extractor = FeatExtractorNet(in_channels=in_channels, base_channels=base_channels_per_stage[0],
                                                           num_stages=self.num_stages)
 
         self.cost_regularizer = nn.ModuleList(
@@ -164,7 +166,7 @@ class MVSNet(nn.Module):
                                     base_channels=self.base_channels_per_stage[i]) for i in range(self.num_stages)])
         self.refine_depth = refine_depth
         if self.refine_depth and self.num_stages == 1:
-            self.depth_refiner = RefineNet(in_channels=7, base_channels=base_channels_per_stage[0]*4)
+            self.depth_refiner = RefineNet(in_channels=in_channels+1, base_channels=base_channels_per_stage[0]*4)
 
     def forward(self, images, projection_mats, depth_values):
         '''
@@ -204,7 +206,6 @@ class MVSNet(nn.Module):
             # The first stage
             else:
                 curr_depth = depth_values
-
             depth_range_samples = uncertainty_aware_samples(curr_depth=curr_depth,
                                                             expected_variance=expected_variance,
                                                             num_depth=self.planes_in_stages[stage_num],

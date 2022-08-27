@@ -12,6 +12,7 @@ from utils.utils import *
 class PSHelper(Helper):
     def __init__(self, args, helper_args, config, in_channels=6, **kwargs):
         super(PSHelper, self).__init__(args, helper_args, config)
+        self.effective_batch = config['batch'] if args.mvsalt else 4
         optim_state, scheduler_state, scaler_state = None, None, None
         self.model = PsNet(in_channels, config['base_channels'], fuse_type=config['fuse_type'],
                            rcpcl_fuse_type=config['rcpcl_fuse_type'], add_type=config['add_type'], bn=args.use_bn,
@@ -34,7 +35,7 @@ class PSHelper(Helper):
         self.optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()),
                                      lr=config['lr'], betas=(self.args.beta_1, self.args.beta_2), weight_decay=self.args.lr_decay)
         milestones = list(
-            map(lambda x: int(x) * len(self.train_loader), self.args.lr_idx.split(':')[0].split(',')))
+            map(lambda x: int(x) * (len(self.train_loader)/4), self.args.lr_idx.split(':')[0].split(',')))
         gamma = float(self.args.lr_idx.split(':')[1])
         self.scheduler = get_step_schedule_with_warmup(optimizer=self.optimizer, milestones=milestones, gamma=gamma)
 
@@ -76,7 +77,7 @@ class PSHelper(Helper):
                 total_loss += float(loss)
 
             if self.is_distributed:
-                if (batch_idx + 1) % 2 == 0 or (batch_idx + 1) == self.num_batches_train:
+                if (batch_idx + 1) % self.effective_batch == 0 or (batch_idx + 1) == self.num_batches_train:
                     self.scaler.scale(loss).backward()
                 else:
                     with self.model.no_sync():
@@ -84,7 +85,7 @@ class PSHelper(Helper):
             else:
                 self.scaler.scale(loss).backward()
 
-            if (batch_idx + 1) % 2 == 0 or (batch_idx + 1) == self.num_batches_train:
+            if (batch_idx + 1) % self.effective_batch == 0 or (batch_idx + 1) == self.num_batches_train:
                 self.scaler.unscale_(self.optimizer)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.max_norm)
                 self.scaler.step(self.optimizer)
