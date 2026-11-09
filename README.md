@@ -1,4 +1,4 @@
-# Deep Helmholtz: 3D Reconstruction for Complex Materials
+# Deep 3D Reconstruction of Scenes with Complex Surface Materials
 
 MSc dissertation (Distinction) — University of Surrey, 2022  
 **Author:** Opemipo Adegbemi · **Supervisor:** Dr. Jean-Yves Guillemaut  
